@@ -1,0 +1,4 @@
+{
+  "name": "hmcl_native",
+  "types": "./index.d.ts"
+}

@@ -1,0 +1,32 @@
+{
+  "string": [
+    {
+      "name": "EntryAbility_desc",
+      "value": "HMCL - Hello Minecraft! Launcher"
+    },
+    {
+      "name": "EntryAbility_label",
+      "value": "HMCL"
+    },
+    {
+      "name": "app_name",
+      "value": "HMCL"
+    },
+    {
+      "name": "module_desc",
+      "value": "Minecraft Java Edition Launcher for HarmonyOS"
+    },
+    {
+      "name": "perm_reason_download",
+      "value": "Download Minecraft game files and JDK runtime"
+    },
+    {
+      "name": "perm_reason_file_persist",
+      "value": "Persist game data to external storage"
+    },
+    {
+      "name": "perm_reason_microphone",
+      "value": "Voice chat in multiplayer games"
+    }
+  ]
+}

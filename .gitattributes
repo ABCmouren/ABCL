@@ -1,0 +1,29 @@
+# Normalize line endings
+* text=auto
+
+# Force LF for source files
+*.ets text eol=lf
+*.ts  text eol=lf
+*.js  text eol=lf
+*.json text eol=lf
+*.json5 text eol=lf
+*.cpp text eol=lf
+*.h   text eol=lf
+*.md  text eol=lf
+*.txt text eol=lf
+*.cmake text eol=lf
+
+# Shell scripts always LF
+hvigorw text eol=lf
+
+# Windows batch files use CRLF
+*.bat text eol=crlf
+
+# Binary files — no line-ending conversion
+*.hap binary
+*.so  binary
+*.jar binary
+*.zip binary
+*.png binary
+*.p12 binary
+*.cer binary

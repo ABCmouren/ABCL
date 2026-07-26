@@ -1,0 +1,29 @@
+{
+  "apiType": "stageMode",
+  "buildOption": {
+    "externalNativeOptions": {
+      "path": "./src/main/cpp/CMakeLists.txt",
+      "arguments": "-DANDROID_STL=c++_shared",
+      "abiFilters": [
+        "arm64-v8a",
+        "x86_64"
+      ]
+    }
+  },
+  "buildOptionSet": [
+    {
+      "name": "debug"
+    },
+    {
+      "name": "release"
+    }
+  ],
+  "targets": [
+    {
+      "name": "default"
+    },
+    {
+      "name": "ohosTest"
+    }
+  ]
+}
