@@ -157,6 +157,37 @@ export class HttpClient {
     }
   }
 
+  /**
+   * 发送 application/x-www-form-urlencoded POST 请求
+   * @param url 请求 URL
+   * @param body 已编码的 form body 字符串（如 "key1=val1&key2=val2"）
+   */
+  static async postForm(url: string, body: string): Promise<HttpResult<string>> {
+    const httpRequest = http.createHttp();
+    try {
+      const result = await httpRequest.request(url, {
+        method: http.RequestMethod.POST,
+        header: {
+          'User-Agent': HttpClient.USER_AGENT,
+          'Content-Type': 'application/x-www-form-urlencoded'
+        },
+        extraData: body,
+        connectTimeout: HttpClient.DEFAULT_TIMEOUT,
+        readTimeout: HttpClient.DEFAULT_TIMEOUT,
+        expectDataType: http.HttpDataType.STRING
+      });
+      if (result.responseCode === 200) {
+        return { success: true, data: result.result as string, statusCode: result.responseCode };
+      }
+      return { success: false, error: `HTTP ${result.responseCode}`, statusCode: result.responseCode };
+    } catch (e) {
+      const err = e as BusinessError;
+      return { success: false, error: err.message || 'Network error' };
+    } finally {
+      httpRequest.destroy();
+    }
+  }
+
   static async checkUrl(url: string): Promise<HttpResult<number>> {
     const httpRequest = http.createHttp();
     try {

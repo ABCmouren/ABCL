@@ -126,7 +126,6 @@ export default struct AccountPage {
           if (!account.selected) {
             this.authService.loadAccounts();
             this.store.setSelectedAccount(account.uuid);
-            this.authService.saveAccounts();
             this.accounts = this.authService.getAccounts();
           }
         });

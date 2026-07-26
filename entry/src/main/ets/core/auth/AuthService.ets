@@ -5,6 +5,7 @@ import { HttpClient, HttpResult } from '../network/HttpClient';
 import { FileUtils } from '../util/Utils';
 import { Constants } from '../../config/Constants';
 import { Logger } from '../util/Utils';
+import { PreferencesManager } from '../storage/PreferencesManager';
 
 // Response interfaces for Microsoft OAuth flow
 interface DeviceCodeResponse {
@@ -59,17 +60,6 @@ interface AuthlibProfileResponse {
   name: string;
 }
 
-interface XblAuthRequest {
-  client_id: string;
-  scope: string;
-}
-
-interface TokenPollRequest {
-  client_id: string;
-  grant_type: string;
-  device_code: string;
-}
-
 interface XblAuthProperties {
   AuthMethod: string;
   SiteName: string;
@@ -103,7 +93,6 @@ interface McProfileHeader {
 
 export class AuthService {
   private static readonly TAG = 'AuthService';
-  private static readonly ACCOUNTS_FILE = 'hmcl_accounts.json';
 
   private store: AppStore;
 
@@ -111,27 +100,21 @@ export class AuthService {
     this.store = AppStore.getInstance();
   }
 
-  // Load accounts from storage
+  // Load accounts from storage (via PreferencesManager)
   loadAccounts(): Account[] {
-    const path = `${Constants.APP_DIR}${AuthService.ACCOUNTS_FILE}`;
-    const data = FileUtils.readFile(path);
-    if (data) {
-      try {
-        const accounts = JSON.parse(data) as Account[];
-        this.store.accounts = accounts;
-        return accounts;
-      } catch (e) {
-        Logger.error(AuthService.TAG, 'Failed to parse accounts', e as Error);
-      }
-    }
-    return [];
+    // PreferencesManager handles auto-loading during init,
+    // so accounts are already in this.store.accounts
+    return this.store.accounts;
   }
 
-  // Save accounts to storage
-  saveAccounts(): void {
-    const path = `${Constants.APP_DIR}${AuthService.ACCOUNTS_FILE}`;
-    const data = JSON.stringify(this.store.accounts, null, 2);
-    FileUtils.writeFile(path, data);
+  // Save accounts to storage (via PreferencesManager, async)
+  private async persistAccounts(): Promise<void> {
+    try {
+      const prefs = PreferencesManager.getInstance();
+      await prefs.saveAccounts();
+    } catch (e) {
+      Logger.warn(AuthService.TAG, `Failed to persist accounts: ${(e as Error).message}`);
+    }
   }
 
   // Create offline mode account
@@ -149,7 +132,7 @@ export class AuthService {
       selected: this.store.accounts.length === 0
     };
     this.store.addAccount(account);
-    this.saveAccounts();
+    this.persistAccounts();
     Logger.info(AuthService.TAG, `Offline account created: ${username}`);
     return account;
   }
@@ -157,43 +140,37 @@ export class AuthService {
   // Microsoft OAuth login (device code flow)
   async loginMicrosoft(): Promise<AuthResult> {
     try {
-      // Step 1: Get device code
-      const deviceCodeBody: XblAuthRequest = {
-        client_id: Constants.AZURE_CLIENT_ID,
-        scope: 'XboxLive.signin offline_access'
-      };
-      const formHeader: Record<string, string> = {
-        'Content-Type': 'application/x-www-form-urlencoded'
-      };
-      const deviceCodeResult = await HttpClient.postJson<DeviceCodeResponse>(
+      // Step 1: Get device code (form-urlencoded)
+      // Build form body manually (ArkTS strict mode: no Record<string,string> literal)
+      const dcClientId: string = Constants.AZURE_CLIENT_ID;
+      const dcScope: string = Constants.MICROSOFT_SCOPES;
+      const deviceCodeResult = await HttpClient.postForm(
         'https://login.microsoftonline.com/consumers/oauth2/v2.0/devicecode',
-        deviceCodeBody,
-        formHeader
+        'client_id=' + encodeURIComponent(dcClientId) + '&scope=' + encodeURIComponent(dcScope)
       );
 
       if (!deviceCodeResult.success || !deviceCodeResult.data) {
         return { success: false, error: 'Failed to get device code' };
       }
 
-      const deviceCode = deviceCodeResult.data;
+      const deviceCode = JSON.parse(deviceCodeResult.data) as DeviceCodeResponse;
 
-      // Step 2: Poll for token
-      const tokenPollBody: TokenPollRequest = {
-        client_id: Constants.AZURE_CLIENT_ID,
-        grant_type: 'urn:ietf:params:oauth:grant-type:device_code',
-        device_code: deviceCode.device_code
-      };
-      const tokenResult = await HttpClient.postJson<TokenResponse>(
+      // Step 2: Poll for token (form-urlencoded)
+      const tokenClientId: string = Constants.AZURE_CLIENT_ID;
+      const tokenGrantType: string = 'urn:ietf:params:oauth:grant-type:device_code';
+      const tokenDeviceCode: string = deviceCode.device_code;
+      const tokenResult = await HttpClient.postForm(
         'https://login.microsoftonline.com/consumers/oauth2/v2.0/token',
-        tokenPollBody,
-        formHeader
+        'client_id=' + encodeURIComponent(tokenClientId) +
+          '&grant_type=' + encodeURIComponent(tokenGrantType) +
+          '&device_code=' + encodeURIComponent(tokenDeviceCode)
       );
 
       if (!tokenResult.success || !tokenResult.data) {
         return { success: false, error: 'Microsoft login failed or user cancelled' };
       }
 
-      const msToken = tokenResult.data;
+      const msToken = JSON.parse(tokenResult.data) as TokenResponse;
 
       // Step 3: Xbox Live authentication
       const xblBody: XblAuthBody = {
@@ -282,7 +259,7 @@ export class AuthService {
       };
 
       this.store.addAccount(account);
-      this.saveAccounts();
+      this.persistAccounts();
       Logger.info(AuthService.TAG, `Microsoft account added: ${profile.name}`);
       return { success: true, account };
     } catch (e) {
@@ -317,7 +294,7 @@ export class AuthService {
       };
 
       this.store.addAccount(account);
-      this.saveAccounts();
+      this.persistAccounts();
       return { success: true, account };
     } catch (e) {
       return { success: false, error: (e as Error).message };
@@ -327,7 +304,7 @@ export class AuthService {
   // Remove account
   removeAccount(uuid: string): void {
     this.store.removeAccount(uuid);
-    this.saveAccounts();
+    this.persistAccounts();
   }
 
   // Get selected account
