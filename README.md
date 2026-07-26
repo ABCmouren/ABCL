@@ -9,11 +9,13 @@
 [![API: 26+](https://img.shields.io/badge/API-26%2B-brightgreen.svg)](https://developer.huawei.com)
 [![Build: Hvigor](https://img.shields.io/badge/Build-Hvigor-9cf)](https://developer.huawei.com)
 
+> ⚠️ **免责声明：本项目未经充分测试，仍处于实验性阶段，如遇到问题请在 Issue 反馈。**
+
 ---
 
 ## 📋 概述
 
-HMCL-HarmonyOS 是 [HMCL](https://github.com/HMCL-dev/HMCL)（Hello Minecraft! Launcher）的鸿蒙原生移植版，基于 [AMCL](https://github.com/AOF-Dev/AMCL)（纯血鸿蒙原生 Minecraft 启动器）的启动架构。它使用 **ArkTS + ArkUI** 构建 UI，通过 **NAPI C++ 桥接层** 直接加载 `libjvm.so` 创建 JVM 来运行 Minecraft Java Edition。
+HMCL-HarmonyOS 是 [HMCL](https://github.com/HMCL-dev/HMCL)（Hello Minecraft! Launcher）的鸿蒙原生移植版，基于 [AMCL](https://github.com/LZZLHY/amcl/releases)（纯血鸿蒙原生 Minecraft 启动器）的启动架构。它使用 **ArkTS + ArkUI** 构建 UI，通过 **NAPI C++ 桥接层** 直接加载 `libjvm.so` 创建 JVM 来运行 Minecraft Java Edition。
 
 ### 为什么需要这个项目？
 
@@ -327,10 +329,8 @@ HarmonyOS 兼容的 LWJGL 3.x 构建，包含 14 个 JAR 文件（~12MB），覆
 ## 🙏 致谢
 
 - **[HMCL](https://github.com/HMCL-dev/HMCL)** — 上游启动器项目，GPL-3.0 许可
-- **[AMCL](https://github.com/AOF-Dev/AMCL)** — 鸿蒙原生 Minecraft 启动器，本项目参考了其原生启动架构（AmclLauncher、GLFW shim、AMCL_SURFACE_ID 约定）
-- **[PojavLauncher](https://github.com/PojavLauncherTeam/PojavLauncher)** — 移动端 JVM 运行的前人经验，AMCL 的前身
+- **[AMCL](https://github.com/LZZLHY/amcl/releases)** — 鸿蒙原生 Minecraft 启动器，本项目参考了其原生启动架构（AmclLauncher、GLFW shim、AMCL_SURFACE_ID 约定）
 - **[LZZLHY/mc-ohos-resources](https://github.com/LZZLHY/mc-ohos-resources)** — HarmonyOS 编译的 JDK 和 LWJGL 资源
-- **华为 DevEco Studio / HarmonyOS NEXT 团队** — XComponent、NAPI、OH_NativeWindow 等 API
 
 ---
 
