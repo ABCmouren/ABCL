@@ -1,0 +1,31 @@
+# HarmonyOS build output
+.workbuddy/
+entry/build/
+entry/.cxx/
+.hvigor/
+
+# DevEco Studio project files
+*.iml
+local.properties
+
+# Node modules (hvigorw)
+node_modules/
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Signing configs (never commit signing keys)
+build-profile.json5.local
+*.p12
+*.cer
+*.keystore
+
+# Logs
+*.log
+*.hlog
+
+# Temp files
+*.tmp
+*.bak
