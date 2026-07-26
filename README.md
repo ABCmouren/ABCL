@@ -13,7 +13,7 @@
 
 ## 📋 概述
 
-HMCL-HarmonyOS 是 [HMCL](https://github.com/HMCL-dev/HMCL)（Hello Minecraft! Launcher）的鸿蒙原生移植版。它使用 **ArkTS + ArkUI** 构建 UI，通过 **NAPI C++ 桥接层** 直接加载 `libjvm.so` 创建 JVM 来运行 Minecraft Java Edition。
+HMCL-HarmonyOS 是 [HMCL](https://github.com/HMCL-dev/HMCL)（Hello Minecraft! Launcher）的鸿蒙原生移植版，基于 [AMCL](https://github.com/AOF-Dev/AMCL)（纯血鸿蒙原生 Minecraft 启动器）的启动架构。它使用 **ArkTS + ArkUI** 构建 UI，通过 **NAPI C++ 桥接层** 直接加载 `libjvm.so` 创建 JVM 来运行 Minecraft Java Edition。
 
 ### 为什么需要这个项目？
 
@@ -246,17 +246,9 @@ bash hvigorw --no-daemon --sync assembleHap
 
 ### 安装到设备
 
-```bash
-# 使用 hdc 安装
-hdc app install entry/build/default/outputs/default/entry-default-unsigned.hap
+构建产物为 HAP 包，直接使用鸿蒙系统的标准安装步骤安装到设备即可。
 
-# 或签名后安装（需在 build-profile.json5 中配置 signingConfigs）
-```
-
-### 注意事项
-
-- **Windows Defender**：OHOS clang++ 工具链在 CMake 配置期间创建临时 `.o.tmp` 文件，Windows Defender 实时保护可能锁住这些文件导致 `Permission denied` 错误。请在构建前关闭实时保护或将项目目录加入排除列表。
-- **签名**：HAP 默认未签名，如需安装到真机请在 DevEco Studio 中配置签名证书。
+> 注意：HAP 默认未签名，如需安装到真机请在 DevEco Studio 中配置签名证书。
 
 ---
 
@@ -335,8 +327,8 @@ HarmonyOS 兼容的 LWJGL 3.x 构建，包含 14 个 JAR 文件（~12MB），覆
 ## 🙏 致谢
 
 - **[HMCL](https://github.com/HMCL-dev/HMCL)** — 上游启动器项目，GPL-3.0 许可
-- **[AMCL](https://github.com/AOF-Dev/AMCL)** — Android 启动器，本项目参考了其原生启动架构（AmclLauncher、GLFW shim、AMCL_SURFACE_ID 约定）
-- **[PojavLauncher](https://github.com/PojavLauncherTeam/PojavLauncher)** — 移动端 JVM 运行的前人经验
+- **[AMCL](https://github.com/AOF-Dev/AMCL)** — 鸿蒙原生 Minecraft 启动器，本项目参考了其原生启动架构（AmclLauncher、GLFW shim、AMCL_SURFACE_ID 约定）
+- **[PojavLauncher](https://github.com/PojavLauncherTeam/PojavLauncher)** — 移动端 JVM 运行的前人经验，AMCL 的前身
 - **[LZZLHY/mc-ohos-resources](https://github.com/LZZLHY/mc-ohos-resources)** — HarmonyOS 编译的 JDK 和 LWJGL 资源
 - **华为 DevEco Studio / HarmonyOS NEXT 团队** — XComponent、NAPI、OH_NativeWindow 等 API
 
