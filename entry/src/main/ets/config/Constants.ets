@@ -175,27 +175,36 @@ export class Constants {
   static readonly LWJGL_JARS_DIR = 'lwjgl_jars';
 
   // MC version → JDK mapping
+  // MC version format: "1.x.y" or "x.y" for newer releases
   static getJdkForMcVersion(mcVersion: string): string {
     const versionNum = mcVersion.split('.');
     const major = parseInt(versionNum[0]) || 0;
     const minor = parseInt(versionNum[1]) || 0;
+    const patch = parseInt(versionNum[2]) || 0;
 
-    if (major >= 26) return Constants.JDK_25_URL;       // 26.1+ → JDK 25
-    if (major >= 21 && (major > 21 || minor >= 1)) {
-      if (major >= 21 && (major > 21 || minor >= 1)) {
-        if (major >= 21 && (major == 21 || major == 20)) {
-          if (major == 20 && minor >= 5) return Constants.JDK_21_URL;  // 1.20.5+ → JDK 21
-          if (major == 21) return Constants.JDK_21_URL;                // 1.21.x → JDK 21
-        }
-      }
-    }
-    if (major == 1) {
-      if (minor >= 18) return Constants.JDK_17_URL;      // 1.18-1.20.4 → JDK 17
-      if (minor == 17) return Constants.JDK_17_URL;      // 1.17 → JDK 16 (use 17)
-      if (minor >= 13) return Constants.JDK_8_URL;       // 1.13-1.16.5 → JDK 8
-      return Constants.JDK_8_URL;                         // ≤1.12.2 → JDK 8
-    }
-    return Constants.JDK_17_URL;  // default
+    // Minecraft 26.1+ → JDK 25 (Java 25)
+    if (major >= 26) return Constants.JDK_25_URL;
+
+    // Minecraft 1.21.x → JDK 21
+    if (major == 1 && minor == 21) return Constants.JDK_21_URL;
+
+    // Minecraft 1.20.5+ → JDK 21
+    if (major == 1 && minor == 20 && patch >= 5) return Constants.JDK_21_URL;
+
+    // Minecraft 1.18-1.20.4 → JDK 17
+    if (major == 1 && minor >= 18) return Constants.JDK_17_URL;
+
+    // Minecraft 1.17 → JDK 17 (recommended 16, use 17 as it's compatible)
+    if (major == 1 && minor == 17) return Constants.JDK_17_URL;
+
+    // Minecraft 1.13-1.16.5 → JDK 8
+    if (major == 1 && minor >= 13) return Constants.JDK_8_URL;
+
+    // Minecraft ≤1.12.2 → JDK 8
+    if (major == 1) return Constants.JDK_8_URL;
+
+    // Default: JDK 17
+    return Constants.JDK_17_URL;
   }
 
   // Get JDK directory name from URL

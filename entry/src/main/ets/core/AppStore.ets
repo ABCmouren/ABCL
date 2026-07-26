@@ -2,8 +2,11 @@
 import { Account } from '../model/Account';
 import { GameInstallation } from '../model/GameVersion';
 import { LauncherConfig, DefaultConfig } from '../model/LauncherConfig';
+import { PreferencesManager } from './storage/PreferencesManager';
+import { Logger } from './util/Utils';
 
 export class AppStore {
+  private static readonly TAG = 'AppStore';
   private static instance: AppStore;
 
   // App state
@@ -33,6 +36,8 @@ export class AppStore {
   setSelectedAccount(uuid: string): void {
     this.accounts.forEach(acc => { acc.selected = acc.uuid === uuid; });
     this.notifyAccountsChanged();
+    // Auto-persist
+    this.persistAccounts();
   }
 
   addAccount(account: Account): void {
@@ -41,11 +46,15 @@ export class AppStore {
     }
     this.accounts.push(account);
     this.notifyAccountsChanged();
+    // Auto-persist
+    this.persistAccounts();
   }
 
   removeAccount(uuid: string): void {
     this.accounts = this.accounts.filter(acc => acc.uuid !== uuid);
     this.notifyAccountsChanged();
+    // Auto-persist
+    this.persistAccounts();
   }
 
   updateConfig(config: Partial<LauncherConfig>): void {
@@ -71,6 +80,19 @@ export class AppStore {
     if (this.onConfigChange) {
       this.onConfigChange(this.config);
     }
+    // Auto-persist config changes
+    this.persistConfig();
+  }
+
+  /**
+   * Replace the entire installations list.
+   * This is used by VersionManager when scanning local versions.
+   */
+  setInstallations(installations: GameInstallation[]): void {
+    this.installations = installations;
+    this.notifyInstallationsChanged();
+    // Auto-persist
+    this.persistInstallations();
   }
 
   onConfigChanged(callback: (config: LauncherConfig) => void): void {
@@ -95,5 +117,34 @@ export class AppStore {
 
   onInstallationsChanged(callback: (installations: GameInstallation[]) => void): void {
     this.onInstallationsChange = callback;
+  }
+
+  // ===== 自动持久化（异步，不阻塞调用方） =====
+
+  private async persistConfig(): Promise<void> {
+    try {
+      const prefs = PreferencesManager.getInstance();
+      await prefs.saveConfig();
+    } catch (e) {
+      Logger.warn(AppStore.TAG, `Auto-persist config failed: ${(e as Error).message}`);
+    }
+  }
+
+  private async persistAccounts(): Promise<void> {
+    try {
+      const prefs = PreferencesManager.getInstance();
+      await prefs.saveAccounts();
+    } catch (e) {
+      Logger.warn(AppStore.TAG, `Auto-persist accounts failed: ${(e as Error).message}`);
+    }
+  }
+
+  private async persistInstallations(): Promise<void> {
+    try {
+      const prefs = PreferencesManager.getInstance();
+      await prefs.saveInstallations();
+    } catch (e) {
+      Logger.warn(AppStore.TAG, `Auto-persist installations failed: ${(e as Error).message}`);
+    }
   }
 }

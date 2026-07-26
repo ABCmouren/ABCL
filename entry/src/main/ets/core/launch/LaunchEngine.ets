@@ -12,6 +12,7 @@ import { Account, UserType } from '../../model/Account';
 import { Constants } from '../../config/Constants';
 import { VersionManager } from '../game/VersionManager';
 import { Logger, FileUtils } from '../util/Utils';
+import { ProcessLauncher, ProcessHandle as ProcessHandleExt } from './ProcessLauncher';
 
 import * as native from './NativeBridge';
 
@@ -25,6 +26,25 @@ export interface ChildProcess {
   kill(): void;
   onExit(callback: (code: number) => void): void;
   onOutput(callback: (data: string) => void): void;
+}
+
+/**
+ * ChildProcessImpl — 实现 ChildProcess 接口
+ * 使用类而非对象字面量，以兼容 ArkTS 严格模式
+ */
+class ChildProcessImpl implements ChildProcess {
+  pid: number = 0;
+  private killFn: () => void = () => {};
+  private onExitFn: (callback: (code: number) => void) => void = () => {};
+  private onOutputFn: (callback: (data: string) => void) => void = () => {};
+
+  setKill(fn: () => void): void { this.killFn = fn; }
+  setOnExit(fn: (callback: (code: number) => void) => void): void { this.onExitFn = fn; }
+  setOnOutput(fn: (callback: (data: string) => void) => void): void { this.onOutputFn = fn; }
+
+  kill(): void { this.killFn(); }
+  onExit(callback: (code: number) => void): void { this.onExitFn(callback); }
+  onOutput(callback: (data: string) => void): void { this.onOutputFn(callback); }
 }
 
 class NativeChildProcess implements ChildProcess {
@@ -216,13 +236,17 @@ export class LaunchEngine {
       if (this.nativeReady) {
         return await this.nativeLaunch(installation, account);
       }
-      return this.stubLaunch(installation, account);
+
+      // Fallback: try @ohos.process child_process launch
+      Logger.info(LaunchEngine.TAG, 'Native bridge not available, trying process launch...');
+      return await this.processLaunch(installation, account);
     } catch (e) {
       this.gameRunning = false;
-      this.logBuffer.push('Launch failed');
+      const errMsg: string = (e as Error).message || 'Unknown error';
+      this.logBuffer.push('Launch failed: ' + errMsg);
       const result: LaunchResult = {
         success: false,
-        error: 'Launch failed',
+        error: errMsg,
         log: this.logBuffer,
       };
       return result;
@@ -233,8 +257,16 @@ export class LaunchEngine {
     const dir: string = this.baseDir;
     const vm: VersionManager = VersionManager.getInstance();
 
+    // Get resolved mainClass (follows inheritsFrom for Forge/Fabric)
     const mainClass: string = await vm.getMainClass(installation.versionId);
     const resolvedMainClass: string = mainClass || 'net.minecraft.client.main.Main';
+
+    // Determine loader flags from installation metadata
+    const isForge: boolean = installation.loaderType === LoaderType.FORGE ||
+                             installation.loaderType === LoaderType.NEO_FORGE;
+    const isFabric: boolean = installation.loaderType === LoaderType.FABRIC ||
+                              installation.loaderType === LoaderType.QUILT;
+
     const mcArgs: string[] = [
       '--username', account.username,
       '--version', installation.versionId,
@@ -246,43 +278,82 @@ export class LaunchEngine {
     ];
     const jitEnabled: boolean = native.jvmCheckJitAvailable();
 
-    // Build classpath: LWJGL jars + version jar + libraries
-    // Note: amcl-launcher.jar is added by native layer via -Djava.class.path, not here
-    const classpath: string[] = [];
+    // Build classpath using VersionManager (handles inheritsFrom + library resolution)
+    // Libraries come first, version JAR last — matches standard launcher convention
+    let classpath: string[] = [];
+    try {
+      classpath = await vm.getClasspathForVersion(installation.versionId);
+      Logger.info(LaunchEngine.TAG, `Resolved classpath: ${classpath.length} entries (Forge=${isForge}, Fabric=${isFabric})`);
+    } catch (ex) {
+      Logger.warn(LaunchEngine.TAG, 'getClasspathForVersion failed, falling back to legacy classpath build');
+    }
 
-    // Add extracted LWJGL JARs (OHOS-compatible builds from rawfile)
-    // These go BEFORE the version jar so they override standard LWJGL classes
+    // If classpath resolution failed, fall back to legacy approach
+    if (classpath.length === 0) {
+      // Fallback attempt 1: manually build classpath from getLibrariesForVersion
+      try {
+        const libs = await vm.getLibrariesForVersion(installation.versionId);
+        const libsDir = `${dir}/${Constants.LIBRARIES_DIR}`;
+        const libsDir2 = `${vm.getMinecraftDir()}/${Constants.LIBRARIES_DIR}`;
+        for (const lib of libs) {
+          if (lib.name && lib.downloads?.artifact?.path) {
+            const jarPath = `${libsDir}/${lib.downloads.artifact.path}`;
+            if (FileUtils.exists(jarPath)) {
+              classpath.push(jarPath);
+            }
+          }
+        }
+        Logger.info(LaunchEngine.TAG, `Fallback classpath: ${classpath.length} entries (from getLibrariesForVersion)`);
+      } catch (ex) {
+        Logger.warn(LaunchEngine.TAG, 'Fallback classpath build also failed');
+      }
+
+      // Fallback attempt 2: add LWJGL JARs
+      if (classpath.length === 0) {
+        const lwjglDir: string = dir + '/' + Constants.LWJGL_JARS_DIR;
+        try {
+          if (FileUtils.exists(lwjglDir)) {
+            for (const rawfile of Constants.LWJGL_JAR_RAWFILES) {
+              const jarName: string = rawfile.substring(rawfile.lastIndexOf('/') + 1);
+              const jarPath: string = `${lwjglDir}/${jarName}`;
+              if (FileUtils.exists(jarPath)) {
+                classpath.push(jarPath);
+              }
+            }
+          }
+        } catch (ex) {
+          Logger.warn(LaunchEngine.TAG, 'LWJGL JARs directory not available');
+        }
+      }
+
+      // Add the Minecraft version jar
+      const versionJar: string = dir + '/' + Constants.VERSIONS_DIR + '/' +
+        installation.versionId + '/' + installation.versionId + '.jar';
+      if (FileUtils.exists(versionJar)) {
+        classpath.push(versionJar);
+      }
+    }
+
+    // Always prepend extracted LWJGL JARs (OHOS-specific, must override standard LWJGL)
+    // These go BEFORE all other JARs so OHOS-compatible GLFW shim takes precedence
     const lwjglDir: string = dir + '/' + Constants.LWJGL_JARS_DIR;
+    const lwjglJars: string[] = [];
     try {
       if (FileUtils.exists(lwjglDir)) {
         for (const rawfile of Constants.LWJGL_JAR_RAWFILES) {
           const jarName: string = rawfile.substring(rawfile.lastIndexOf('/') + 1);
           const jarPath: string = `${lwjglDir}/${jarName}`;
-          if (FileUtils.exists(jarPath)) {
-            classpath.push(jarPath);
+          if (FileUtils.exists(jarPath) && !classpath.includes(jarPath)) {
+            lwjglJars.push(jarPath);
           }
         }
-        Logger.info(LaunchEngine.TAG, `Added ${Constants.LWJGL_JAR_RAWFILES.length} LWJGL JARs to classpath`);
+        if (lwjglJars.length > 0) {
+          classpath = [...lwjglJars, ...classpath];
+          Logger.info(LaunchEngine.TAG, `Prepended ${lwjglJars.length} LWJGL JARs`);
+        }
       }
     } catch (ex) {
       Logger.warn(LaunchEngine.TAG, 'LWJGL JARs directory not available');
-    }
-
-    // Add the Minecraft version jar
-    const versionJar: string = dir + '/' + Constants.VERSIONS_DIR + '/' +
-      installation.versionId + '/' + installation.versionId + '.jar';
-    classpath.push(versionJar);
-
-    // Add all library jars from the libraries directory (AMCL will also resolve these)
-    const libsDir: string = dir + '/' + Constants.LIBRARIES_DIR;
-    try {
-      if (FileUtils.exists(libsDir)) {
-        // AMCL has its own classpath resolution, but we include the top-level
-        // library paths as hints
-        Logger.info(LaunchEngine.TAG, 'Libraries directory exists: ' + libsDir);
-      }
-    } catch (ex) {
-      Logger.warn(LaunchEngine.TAG, 'Libraries directory not available');
     }
 
     const launchConfigJson: string = JSON.stringify({
@@ -296,14 +367,16 @@ export class LaunchEngine {
       mcArgs: mcArgs,
       minMemory: installation.minMemory,
       maxMemory: installation.maxMemory,
-      isForge: false,
-      isFabric: false,
+      isForge: isForge,
+      isFabric: isFabric,
       jitEnabled: jitEnabled,
     });
 
     this.logBuffer.push('Launching via native JVM bridge...');
     this.logBuffer.push('JDK: ' + this.javaHome);
     this.logBuffer.push('JIT: ' + (jitEnabled ? 'enabled' : 'disabled (interpreter mode)'));
+    this.logBuffer.push('Loader: ' + (isForge ? 'Forge/NeoForge' : isFabric ? 'Fabric/Quilt' : 'Vanilla'));
+    this.logBuffer.push('MainClass: ' + resolvedMainClass);
     this.logBuffer.push('Classpath entries: ' + classpath.length);
 
     const result: number = native.mcLaunch(launchConfigJson);
@@ -329,6 +402,126 @@ export class LaunchEngine {
       log: this.logBuffer,
     };
     return successResult;
+  }
+
+  /**
+   * Launch via @ohos.process child_process (fallback when native bridge is unavailable).
+   * This method spawns a separate Java process with piped stdio.
+   */
+  private async processLaunch(installation: GameInstallation, account: Account): Promise<LaunchResult> {
+    const dir: string = this.baseDir;
+    const vm: VersionManager = VersionManager.getInstance();
+
+    const mainClass: string = await vm.getMainClass(installation.versionId);
+    const resolvedMainClass: string = mainClass || 'net.minecraft.client.main.Main';
+
+    const isForge: boolean = installation.loaderType === LoaderType.FORGE ||
+                             installation.loaderType === LoaderType.NEO_FORGE;
+    const isFabric: boolean = installation.loaderType === LoaderType.FABRIC ||
+                              installation.loaderType === LoaderType.QUILT;
+
+    const mcArgs: string[] = [
+      '--username', account.username,
+      '--version', installation.versionId,
+      '--gameDir', dir,
+      '--assetsDir', dir + '/' + Constants.ASSETS_DIR,
+      '--uuid', account.uuid,
+      '--accessToken', account.accessToken,
+      '--userProperties', account.userProperties || '{}',
+    ];
+
+    // Build classpath
+    let classpath: string[] = [];
+    try {
+      classpath = await vm.getClasspathForVersion(installation.versionId);
+    } catch (ex) {
+      Logger.warn(LaunchEngine.TAG, 'getClasspathForVersion failed for process launch');
+    }
+
+    // Prepend LWJGL JARs
+    const lwjglDir: string = dir + '/' + Constants.LWJGL_JARS_DIR;
+    const lwjglJars: string[] = [];
+    try {
+      if (FileUtils.exists(lwjglDir)) {
+        for (const rawfile of Constants.LWJGL_JAR_RAWFILES) {
+          const jarName: string = rawfile.substring(rawfile.lastIndexOf('/') + 1);
+          const jarPath: string = `${lwjglDir}/${jarName}`;
+          if (FileUtils.exists(jarPath) && !classpath.includes(jarPath)) {
+            lwjglJars.push(jarPath);
+          }
+        }
+        if (lwjglJars.length > 0) {
+          classpath = [...lwjglJars, ...classpath];
+        }
+      }
+    } catch (ex) {
+      Logger.warn(LaunchEngine.TAG, 'LWJGL JARs directory not available');
+    }
+
+    this.logBuffer.push('Launching via @ohos.process child_process...');
+    this.logBuffer.push('JDK: ' + this.javaHome);
+    this.logBuffer.push('Loader: ' + (isForge ? 'Forge/NeoForge' : isFabric ? 'Fabric/Quilt' : 'Vanilla'));
+    this.logBuffer.push('MainClass: ' + resolvedMainClass);
+
+    const processLauncher = ProcessLauncher.getInstance();
+
+    try {
+      // Check Java availability
+      const javaAvailable = await processLauncher.checkJavaAvailable(this.javaHome);
+      if (!javaAvailable) {
+        throw new Error(`Java executable not found at ${this.javaHome}/bin/java`);
+      }
+
+      const handle: ProcessHandleExt = await processLauncher.launchJava({
+        javaHome: this.javaHome,
+        mainClass: resolvedMainClass,
+        classpath: classpath,
+        mcArgs: mcArgs,
+        minMemory: installation.minMemory,
+        maxMemory: installation.maxMemory,
+        gameDir: dir,
+        filesDir: this.filesDir,
+        customJvmArgs: installation.customJvmArgs,
+        isForge: isForge,
+        isFabric: isFabric,
+      });
+
+      this.logBuffer.push(`Java process started, PID: ${handle.pid}`);
+
+      // Set up output callbacks
+      handle.onOutput((data: string) => {
+        this.logBuffer.push(data);
+      });
+      handle.onError((data: string) => {
+        this.logBuffer.push('[STDERR] ' + data);
+      });
+
+      // Set up exit callback
+      handle.onExit((code: number) => {
+        Logger.info(LaunchEngine.TAG, `Java process exited with code: ${code}`);
+        this.gameRunning = false;
+      });
+
+      this.gameRunning = true;
+
+      // Wrap the handle in a ChildProcessImpl
+      const childProcess = this.buildChildProcessFromHandle(handle);
+
+      return {
+        success: true,
+        process: childProcess,
+        log: this.logBuffer,
+      };
+    } catch (e) {
+      const err: Error = e as Error;
+      this.gameRunning = false;
+      this.logBuffer.push('Process launch failed: ' + err.message);
+      return {
+        success: false,
+        error: err.message,
+        log: this.logBuffer,
+      };
+    }
   }
 
   private async stubLaunch(installation: GameInstallation, account: Account): Promise<LaunchResult> {
@@ -440,6 +633,23 @@ export class LaunchEngine {
 
   getGameProcess(): ChildProcess | null {
     return this.proc;
+  }
+
+  /**
+   * Build a ChildProcess wrapper from a ProcessHandleExt.
+   * ArkTS strict mode requires method references, not inline arrow functions in object literals.
+   */
+  private buildChildProcessFromHandle(handle: ProcessHandleExt): ChildProcess {
+    const handlePid = handle.pid;
+    const handleKill = handle.kill;
+    const handleOnExit = handle.onExit;
+    const handleOnOutput = handle.onOutput;
+    const impl = new ChildProcessImpl();
+    impl.pid = handlePid;
+    impl.setKill(() => { handleKill(); });
+    impl.setOnExit((cb: (code: number) => void) => { handleOnExit(cb); });
+    impl.setOnOutput((cb: (data: string) => void) => { handleOnOutput(cb); });
+    return impl;
   }
 
   setJavaHome(path: string): void {

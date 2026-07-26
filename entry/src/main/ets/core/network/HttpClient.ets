@@ -100,15 +100,14 @@ export class HttpClient {
         header: { 'User-Agent': HttpClient.USER_AGENT },
         connectTimeout: 60000,
         readTimeout: 600000, // 10 min for large downloads
-        expectDataType: http.HttpDataType.STRING
+        expectDataType: http.HttpDataType.ARRAY_BUFFER
       });
 
       if (result.responseCode === 200) {
-        const rawData = result.result as object;
+        const rawData = result.result as ArrayBuffer;
         // Write the response to file
         const file = fs.openSync(savePath, fs.OpenMode.CREATE | fs.OpenMode.WRITE_ONLY);
-        // For stream data, we need to write the ArrayBuffer
-        if (rawData instanceof ArrayBuffer) {
+        if (rawData) {
           fs.writeSync(file.fd, rawData);
         }
         fs.closeSync(file);
@@ -118,6 +117,41 @@ export class HttpClient {
     } catch (e) {
       const err = e as BusinessError;
       return { success: false, error: err.message || 'Download failed' };
+    } finally {
+      httpRequest.destroy();
+    }
+  }
+
+  /**
+   * Fetch a URL and return the raw text content (XML, plain text, etc.)
+   * Used by ModLoaderInstaller to fetch Maven metadata XML and install profiles.
+   */
+  static async getText(url: string, headers?: Record<string, string>): Promise<HttpResult<string>> {
+    const httpRequest = http.createHttp();
+    try {
+      const headerObj: Record<string, string> = {
+        'User-Agent': HttpClient.USER_AGENT,
+      };
+      if (headers) {
+        const keys = Object.keys(headers);
+        for (const key of keys) {
+          headerObj[key] = headers[key];
+        }
+      }
+      const result = await httpRequest.request(url, {
+        method: http.RequestMethod.GET,
+        header: headerObj,
+        connectTimeout: HttpClient.DEFAULT_TIMEOUT,
+        readTimeout: 30000,
+        expectDataType: http.HttpDataType.STRING
+      });
+      if (result.responseCode === 200) {
+        return { success: true, data: result.result as string, statusCode: result.responseCode };
+      }
+      return { success: false, error: `HTTP ${result.responseCode}`, statusCode: result.responseCode };
+    } catch (e) {
+      const err = e as BusinessError;
+      return { success: false, error: err.message || 'Network error' };
     } finally {
       httpRequest.destroy();
     }

@@ -1,14 +1,10 @@
 # HarmonyOS build output
+.workbuddy/
 entry/build/
 entry/.cxx/
-build/
-
-# Hvigor cache
 .hvigor/
-hvigor/wrapper/
 
 # DevEco Studio project files
-.idea/
 *.iml
 local.properties
 
@@ -33,9 +29,3 @@ build-profile.json5.local
 # Temp files
 *.tmp
 *.bak
-
-# Large binary rawfiles - JDK zips are too large for GitHub
-# Download separately or use Git LFS
-entry/src/main/resources/rawfile/jdk8-ohos-full.zip
-entry/src/main/resources/rawfile/jdk17-ohos-full-v4.zip
-entry/src/main/resources/rawfile/jdk21-ohos-full.zip

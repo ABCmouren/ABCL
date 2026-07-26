@@ -80,7 +80,7 @@ export class VersionManager {
       }
     }
 
-    this.store.installations = installations;
+    this.store.setInstallations(installations);
     return installations;
   }
 
@@ -175,19 +175,19 @@ export class VersionManager {
     return this.store.config.gameDirectory || `${Constants.APP_DIR}${Constants.MINECRAFT_DIR}`;
   }
 
-  // Get main class for a version
+  // Get main class for a version (follows inheritsFrom chain)
   async getMainClass(versionId: string): Promise<string> {
-    const versionJson = await this.getVersionInfo(versionId);
+    const versionJson = await this.getResolvedVersionInfo(versionId);
     return versionJson.mainClass || 'net.minecraft.client.main.Main';
   }
 
   // Get libraries for a version
   async getLibrariesForVersion(versionId: string): Promise<Library[]> {
-    const versionJson = await this.getVersionInfo(versionId);
+    const versionJson = await this.getResolvedVersionInfo(versionId);
     return versionJson.libraries || [];
   }
 
-  // Get version info (parsed version JSON)
+  // Get version info (parsed version JSON) — raw, no inheritance resolution
   async getVersionInfo(versionId: string): Promise<GameVersionJson> {
     const versionDir = `${this.getVersionsDir()}/${versionId}`;
     const versionJsonPath = `${versionDir}/${versionId}.json`;
@@ -196,6 +196,184 @@ export class VersionManager {
     }
     const data = FileUtils.readFile(versionJsonPath);
     return JSON.parse(data) as GameVersionJson;
+  }
+
+  /**
+   * Get resolved version info with inheritsFrom chain merged.
+   * Forge/Fabric/Quilt version JSONs have `inheritsFrom` pointing to the
+   * vanilla version. We need to merge libraries and inherit mainClass from
+   * the parent only if the child doesn't override it.
+   *
+   * Merge rules (same as HMCL / standard launcher):
+   *   - mainClass: child takes priority over parent
+   *   - libraries: child libs prepended, parent libs appended (child wins on duplicate name)
+   *   - arguments/minecraftArguments: child takes priority
+   *   - everything else: child takes priority, fall back to parent
+   */
+  async getResolvedVersionInfo(versionId: string): Promise<GameVersionJson> {
+    const child = await this.getVersionInfo(versionId);
+
+    if (!child.inheritsFrom) {
+      // Vanilla — no merging needed
+      return child;
+    }
+
+    Logger.info(VersionManager.TAG, `Version ${versionId} inheritsFrom ${child.inheritsFrom}`);
+
+    let parent: GameVersionJson;
+    try {
+      // Parent is usually a vanilla version already installed
+      parent = await this.getVersionInfo(child.inheritsFrom);
+    } catch (e) {
+      Logger.warn(VersionManager.TAG,
+        `Parent version ${child.inheritsFrom} not found, launching with child only`);
+      return child;
+    }
+
+    // Merge libraries: child first (so child's Forge/Fabric libs override), then parent
+    const childLibNames = new Set<string>();
+    const mergedLibs: Library[] = [];
+
+    for (const lib of (child.libraries || [])) {
+      childLibNames.add(lib.name);
+      mergedLibs.push(lib);
+    }
+    for (const lib of (parent.libraries || [])) {
+      if (!childLibNames.has(lib.name)) {
+        mergedLibs.push(lib);
+      }
+    }
+
+    const resolved: GameVersionJson = {
+      // Manually merge fields (ArkTS strict mode forbids spread on objects)
+      id: child.id || parent.id,
+      type: child.type || parent.type,
+      time: child.time || parent.time,
+      releaseTime: child.releaseTime || parent.releaseTime,
+      minecraftArguments: child.minecraftArguments || parent.minecraftArguments,
+      arguments: child.arguments || parent.arguments,
+      // mainClass: child takes priority (Forge/Fabric override this)
+      mainClass: child.mainClass || parent.mainClass || 'net.minecraft.client.main.Main',
+      inheritsFrom: child.inheritsFrom || parent.inheritsFrom,
+      jar: child.jar || parent.jar,
+      minimumLauncherVersion: child.minimumLauncherVersion || parent.minimumLauncherVersion,
+      // assets: child takes priority
+      assets: child.assets || parent.assets,
+      // assetIndex: child takes priority
+      assetIndex: child.assetIndex || parent.assetIndex || { id: '', sha1: '', size: 0, totalSize: 0, url: '' },
+      // downloads: child takes priority
+      downloads: child.downloads || parent.downloads || { client: { sha1: '', size: 0, url: '' } },
+      // libraries: merged
+      libraries: mergedLibs,
+      logging: child.logging || parent.logging,
+      complianceLevel: child.complianceLevel || parent.complianceLevel,
+    };
+
+    Logger.info(VersionManager.TAG,
+      `Resolved ${versionId}: mainClass=${resolved.mainClass}, ` +
+      `libs=${mergedLibs.length} (child=${child.libraries?.length || 0} + parent=${parent.libraries?.length || 0})`);
+
+    return resolved;
+  }
+
+  /**
+   * Build the full classpath array for launching a version.
+   * Resolves `inheritsFrom` chain and converts Maven-style library names
+   * to absolute file paths under the libraries directory.
+   *
+   * Library name format: "group:artifact:version" → Maven path
+   * e.g. "cpw.mods:bootstraplauncher:1.1.2" →
+   *      libraries/cpw/mods/bootstraplauncher/1.1.2/bootstraplauncher-1.1.2.jar
+   *
+   * Returns: [version.jar, ...library jars in classpath order]
+   */
+  async getClasspathForVersion(versionId: string): Promise<string[]> {
+    const resolved = await this.getResolvedVersionInfo(versionId);
+    const libsDir = `${this.getMinecraftDir()}/${Constants.LIBRARIES_DIR}`;
+    const versionsDir = this.getVersionsDir();
+    const classpath: string[] = [];
+
+    // Add library JARs (filter by rules: skip platform-specific natives)
+    for (const lib of (resolved.libraries || [])) {
+      if (!lib.name) continue;
+
+      // Skip libraries with OS rules that exclude HarmonyOS (treated as Linux)
+      if (lib.rules) {
+        let allowed = false;
+        for (const rule of lib.rules) {
+          if (rule.action === 'allow') {
+            if (!rule.os) {
+              allowed = true; // allow all platforms
+            } else if (rule.os.name === 'linux' || rule.os.name === 'ohos') {
+              allowed = true; // allow Linux/HarmonyOS
+            }
+          } else if (rule.action === 'disallow') {
+            if (rule.os && (rule.os.name === 'linux' || rule.os.name === 'ohos')) {
+              allowed = false;
+              break;
+            }
+          }
+        }
+        if (!allowed) continue;
+      }
+
+      // Skip native-only classifier libs (we handle natives separately)
+      if (lib.natives) {
+        // This lib entry is for natives extraction, skip JAR from classpath
+        continue;
+      }
+
+      // Prefer downloads.artifact.path (it's the canonical Maven path)
+      let jarPath: string | null = null;
+      if (lib.downloads?.artifact?.path) {
+        jarPath = `${libsDir}/${lib.downloads.artifact.path}`;
+      } else {
+        jarPath = this.mavenNameToPath(lib.name, libsDir);
+      }
+      if (jarPath && FileUtils.exists(jarPath)) {
+        classpath.push(jarPath);
+      } else if (jarPath) {
+        Logger.warn(VersionManager.TAG, `Library JAR not found: ${jarPath}`);
+      }
+    }
+
+    // Add the version JAR (or parent jar for Forge/Fabric which set `jar` field)
+    const jarName = resolved.jar || versionId;
+    const versionJar = `${versionsDir}/${jarName}/${jarName}.jar`;
+    if (FileUtils.exists(versionJar)) {
+      classpath.push(versionJar);
+    } else {
+      Logger.warn(VersionManager.TAG, `Version JAR not found: ${versionJar}`);
+    }
+
+    Logger.info(VersionManager.TAG, `Classpath for ${versionId}: ${classpath.length} entries`);
+    return classpath;
+  }
+
+  /**
+   * Convert Maven coordinate "group:artifact:version[:classifier]"
+   * to an absolute JAR path under libsDir.
+   *
+   * e.g. "net.minecraftforge:forge:1.20.4-49.0.19:universal"
+   *   → libsDir/net/minecraftforge/forge/1.20.4-49.0.19/forge-1.20.4-49.0.19-universal.jar
+   */
+  private mavenNameToPath(name: string, libsDir: string): string | null {
+    // Use downloads.artifact.path if present (most reliable)
+    // We'll resolve from name since we don't have the Library object here
+
+    const parts = name.split(':');
+    if (parts.length < 3) return null;
+
+    const group = parts[0].replace(/\./g, '/');
+    const artifact = parts[1];
+    const version = parts[2];
+    const classifier = parts.length >= 4 ? parts[3] : '';
+
+    const jarFile = classifier
+      ? `${artifact}-${version}-${classifier}.jar`
+      : `${artifact}-${version}.jar`;
+
+    return `${libsDir}/${group}/${artifact}/${version}/${jarFile}`;
   }
 
   // Initialize Minecraft directory structure

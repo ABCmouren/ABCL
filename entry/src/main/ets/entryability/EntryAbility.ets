@@ -8,6 +8,10 @@ import { Logger, FileUtils } from '../core/util/Utils';
 import { LaunchEngine } from '../core/launch/LaunchEngine';
 import { JdkManager } from '../core/launch/JdkManager';
 import { JdkExtractor } from '../core/launch/JdkExtractor';
+import { PreferencesManager } from '../core/storage/PreferencesManager';
+import { ModLoaderInstaller } from '../core/game/ModLoaderInstaller';
+import { AssetsManager } from '../core/game/AssetsManager';
+import { NativesManager } from '../core/launch/NativesManager';
 import { Constants } from '../config/Constants';
 
 interface BundledJdk {
@@ -30,6 +34,28 @@ export default class EntryAbility extends UIAbility {
     const filesDir = context.filesDir;
 
     Logger.info('EntryAbility', `Files dir: ${filesDir}`);
+
+    // Initialize PreferencesManager for persistent storage
+    // Must be done before any other initialization that uses settings
+    const prefsManager = PreferencesManager.getInstance();
+    prefsManager.setContext(context);
+    await prefsManager.init(filesDir);
+    Logger.info('EntryAbility', 'PreferencesManager initialized');
+
+    // Initialize the ModLoaderInstaller with base directory
+    const modLoaderInstaller = ModLoaderInstaller.getInstance();
+    modLoaderInstaller.init(filesDir);
+    Logger.info('EntryAbility', 'ModLoaderInstaller initialized');
+
+    // Initialize the AssetsManager for Minecraft asset downloads
+    const assetsManager = AssetsManager.getInstance();
+    assetsManager.init(filesDir);
+    Logger.info('EntryAbility', 'AssetsManager initialized');
+
+    // Initialize the NativesManager for native .so library extraction
+    const nativesManager = NativesManager.getInstance();
+    nativesManager.init(filesDir, context.resourceManager);
+    Logger.info('EntryAbility', 'NativesManager initialized');
 
     // Initialize the JDK manager with resource manager for rawfile extraction
     const jdkManager = JdkManager.getInstance();
