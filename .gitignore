@@ -1,31 +1,68 @@
-# HarmonyOS build output
-.workbuddy/
-entry/build/
-entry/.cxx/
-.hvigor/
+```
+# Build artifacts
+build/
+dist/
 
-# DevEco Studio project files
-*.iml
-local.properties
-
-# Node modules (hvigorw)
+# Dependencies
 node_modules/
+.venv/
+venv/
+__pycache__/
 
-# OS files
+# IDE files
+.vscode/
+.idea/
+
+# Environment
+.env
+.env.local
+*.env.*
+
+# Logs and temp files
+*.log
+*.tmp
+
+# Compiled files
+*.pyc
+*.class
+*.o
+*.exe
+*.dll
+*.so
+*.a
+*.obj
+*.out
+
+# System files
 .DS_Store
 Thumbs.db
-desktop.ini
 
-# Signing configs (never commit signing keys)
-build-profile.json5.local
-*.p12
-*.cer
-*.keystore
+# Coverage
+coverage/
+htmlcov/
+.coverage
 
-# Logs
-*.log
-*.hlog
-
-# Temp files
-*.tmp
-*.bak
+# Compression
+*.zip
+*.gz
+*.tar
+*.tgz
+*.bz2
+*.xz
+*.7z
+*.rar
+*.zst
+*.lz4
+*.lzh
+*.cab
+*.arj
+*.rpm
+*.deb
+*.Z
+*.lz
+*.lzo
+*.tar.gz
+*.tar.bz2
+*.tar.xz
+*.tar.zst
+```

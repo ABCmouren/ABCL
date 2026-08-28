@@ -83,6 +83,9 @@ export class Constants {
   static readonly CONFIG_DIR = 'config';
   static readonly SCREENSHOTS_DIR = 'screenshots';
   static readonly SAVES_DIR = 'saves';
+  static readonly CONTROLS_DIR = 'controls';
+  static readonly CACHE_DIR = 'cache';
+  static readonly TEMP_DIR = 'temp';
 
   // Default JVM arguments
   static readonly DEFAULT_JVM_ARGS = [
