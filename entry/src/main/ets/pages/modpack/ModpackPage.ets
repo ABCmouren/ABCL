@@ -1,485 +1,396 @@
 /**
- * ModpackPage - Modpack management page
+ * ModpackPage — 整合包管理（真实读写 modpacks/ 目录）
+ *
+ * 2026-10 重写：原实现是 generateMockModpacks() 造的假数据。
+ * 现在对应 HMCL 的 ModpackPage：
+ *   - 扫描 modpacks/ 下所有 .zip
+ *   - 解压后识别 CurseForge(manifest.json) 与 Modrinth(modrinth.index.json) 两种清单
+ *   - 展示 MC 版本 / 加载器 / 文件数 / 作者
+ *   - 支持删除；「安装到实例」把内容铺进目标游戏目录
  */
-
-import { EmptyView, SearchBar, Card, SectionHeader, ProgressBar } from '../../components/common/CommonComponents';
-
-interface ModpackInfo {
-  name: string;
-  version: string;
-  author: string;
-  description: string;
-  mcVersion: string;
-  modLoader: string;
-  modCount: number;
-  icon: string;
-  source: string; // CurseForge, Modrinth, MultiMC
-  installStatus: InstallStatus;
-  installProgress: number;
-}
-
-enum InstallStatus {
-  NOT_INSTALLED = 'not_installed',
-  INSTALLING = 'installing',
-  INSTALLED = 'installed',
-  UPDATE_AVAILABLE = 'update_available',
-  FAILED = 'failed'
-}
+import { InstalledModpack, ModpackManager } from '../../core/modplatform/ModpackManager';
+import { VersionManager } from '../../core/game/VersionManager';
+import { HmclTheme } from '../../theme/HmclTheme';
+import { FileUtils, Logger, StringUtils } from '../../core/util/Utils';
+import { EmptyView, LoadingView } from '../../components/common/CommonComponents';
 
 @Component
 export default struct ModpackPage {
-  @State private modpacks: ModpackInfo[] = [];
-  @State private filteredModpacks: ModpackInfo[] = [];
-  @State private isLoading: boolean = true;
-  @State private searchText: string = '';
-  @State private showDetail: boolean = false;
-  @State private selectedIndex: number = -1;
-  @State private showImportPicker: boolean = false;
+  @State packs: InstalledModpack[] = [];
+  @State isLoading: boolean = true;
+  @State searchText: string = '';
+  @State detail: InstalledModpack | null = null;
+  @State parseNote: string = '';
+  @State error: string = '';
+
+  @State applying: boolean = false;
+  @State applyNote: string = '';
+
+  private versionManager = VersionManager.getInstance();
 
   aboutToAppear(): void {
-    this.loadModpacks();
+    this.reload();
   }
 
-  private loadModpacks(): void {
+  private mcDir(): string {
+    return this.versionManager.getMinecraftDir();
+  }
+
+  private reload(): void {
     this.isLoading = true;
-    setTimeout(() => {
-      this.modpacks = this.generateMockModpacks();
-      this.filteredModpacks = [...this.modpacks];
-      this.isLoading = false;
-    }, 400);
-  }
-
-  private generateMockModpacks(): ModpackInfo[] {
-    return [
-      {
-        name: 'All the Mods 9',
-        version: '0.2.0',
-        author: 'AllTheMods',
-        description: 'Over 400 mods in a massive kitchen-sink pack',
-        mcVersion: '1.20.1',
-        modLoader: 'Forge',
-        modCount: 420,
-        icon: '📦',
-        source: 'CurseForge',
-        installStatus: InstallStatus.INSTALLED,
-        installProgress: 1
-      },
-      {
-        name: 'Better MC [Fabric]',
-        version: '1.20.4',
-        author: 'BetterMC Team',
-        description: 'Enhanced vanilla experience with performance and quality of life mods',
-        mcVersion: '1.20.4',
-        modLoader: 'Fabric',
-        modCount: 180,
-        icon: '✨',
-        source: 'CurseForge',
-        installStatus: InstallStatus.UPDATE_AVAILABLE,
-        installProgress: 1
-      },
-      {
-        name: 'SkyFactory 5',
-        version: '1.0.0',
-        author: 'Darkosto',
-        description: 'Skyblock-style modpack with tech and magic',
-        mcVersion: '1.20.1',
-        modLoader: 'NeoForge',
-        modCount: 280,
-        icon: '☁️',
-        source: 'Modrinth',
-        installStatus: InstallStatus.NOT_INSTALLED,
-        installProgress: 0
-      },
-      {
-        name: 'Prominence II',
-        version: '2.3.1',
-        author: 'Prominence Team',
-        description: 'RPG-themed modpack with custom quests',
-        mcVersion: '1.20.1',
-        modLoader: 'Forge',
-        modCount: 320,
-        icon: '⚔️',
-        source: 'CurseForge',
-        installStatus: InstallStatus.NOT_INSTALLED,
-        installProgress: 0
-      },
-      {
-        name: 'Create: Above and Beyond',
-        version: '1.0.5',
-        author: 'Create Mod Team',
-        description: 'Factory automation with Create mod',
-        mcVersion: '1.18.2',
-        modLoader: 'Forge',
-        modCount: 120,
-        icon: '⚙️',
-        source: 'MultiMC',
-        installStatus: InstallStatus.INSTALLED,
-        installProgress: 1
+    this.error = '';
+    // ⚠️ 顺序很重要：seedDemoModpacks 是异步的（要等 zlib 打包完成），
+    // 必须 await 之后再 scan，否则 scan 跑在 zip 落盘之前，列表还是空的。
+    void (async () => {
+      try {
+        const seeded: number = await ModpackManager.seedDemoModpacks(this.mcDir());
+        this.packs = ModpackManager.scan(this.mcDir());
+        this.parseNote = this.packs.length > 0
+          ? ''
+          : '还没有整合包。可在「下载 → 整合包」Tab 下载，或把 .zip 放进 modpacks/ 目录。';
+        this.isLoading = false;
+        this.parseAll();
+      } catch (e) {
+        this.error = '读取整合包目录失败：' + (e as Error).message;
+        Logger.error('ModpackPage', this.error);
+        this.isLoading = false;
       }
-    ];
+    })();
   }
 
-  private installModpack(index: number): void {
-    const modpack = this.filteredModpacks[index];
-    modpack.installStatus = InstallStatus.INSTALLING;
-    modpack.installProgress = 0;
-    this.filteredModpacks = [...this.filteredModpacks];
-
-    // Simulate installation progress
-    let progress = 0;
-    const interval = setInterval(() => {
-      progress += Math.random() * 0.12;
-      if (progress >= 1) {
-        progress = 1;
-        clearInterval(interval);
-        modpack.installStatus = InstallStatus.INSTALLED;
-        modpack.installProgress = 1;
-        this.filteredModpacks = [...this.filteredModpacks];
-        // Update the main list too
-        this.modpacks = this.modpacks.map(m =>
-          m.name === modpack.name ? modpack : m
-        );
-      } else {
-        modpack.installProgress = progress;
-        this.filteredModpacks = [...this.filteredModpacks];
+  /** 逐个解压解析清单（后台进行，大包可能稍慢） */
+  private parseAll(): void {
+    const pending = this.packs.filter((p: InstalledModpack) => !p.metaLoaded);
+    if (pending.length === 0) {
+      return;
+    }
+    const root = `${this.mcDir()}/.modpack-tmp`;
+    void (async () => {
+      for (const pack of pending) {
+        this.parseNote = `解析 ${pack.fileName}…`;
+        const info = await ModpackManager.inspect(pack, root);
+        pack.info = info;
+        pack.metaLoaded = true;
+        this.packs = this.packs.slice();
       }
-    }, 400);
+      this.parseNote = '';
+      FileUtils.delete(root);
+    })();
   }
 
-  private updateModpack(index: number): void {
-    // Same as install but with update logic
-    this.installModpack(index);
-  }
-
-  private importModpack(): void {
-    console.info('Opening file picker for modpack import...');
-    this.showImportPicker = false;
-    // In real implementation: open file dialog for .zip, .mrpack, .txt files
-  }
-
-  private viewDetails(index: number): void {
-    this.selectedIndex = index;
-    this.showDetail = true;
-  }
-
-  private onSearch(text: string): void {
-    this.searchText = text;
-    if (text.length === 0) {
-      this.filteredModpacks = [...this.modpacks];
-    } else {
-      const query = text.toLowerCase();
-      this.filteredModpacks = this.modpacks.filter(mp =>
-        mp.name.toLowerCase().includes(query) ||
-        mp.author.toLowerCase().includes(query) ||
-        mp.description.toLowerCase().includes(query) ||
-        mp.source.toLowerCase().includes(query)
-      );
+  private visible(): InstalledModpack[] {
+    if (this.searchText.length === 0) {
+      return this.packs;
     }
+    const q = this.searchText.toLowerCase();
+    return this.packs.filter((p: InstalledModpack) => {
+      const name = p.info !== null ? p.info.name.toLowerCase() : '';
+      return p.fileName.toLowerCase().indexOf(q) >= 0 || name.indexOf(q) >= 0;
+    });
   }
 
-  private getStatusLabel(status: InstallStatus): string {
-    switch (status) {
-      case InstallStatus.NOT_INSTALLED: return 'Install';
-      case InstallStatus.INSTALLING: return 'Installing...';
-      case InstallStatus.INSTALLED: return 'Installed';
-      case InstallStatus.UPDATE_AVAILABLE: return 'Update';
-      case InstallStatus.FAILED: return 'Failed';
-      default: return 'Unknown';
+  private packTitle(pack: InstalledModpack): string {
+    if (pack.info !== null && pack.info.name.length > 0) {
+      return pack.info.name;
     }
+    return pack.fileName.replace(/\.zip$/i, '');
   }
 
-  private getStatusColor(status: InstallStatus): ResourceColor {
-    switch (status) {
-      case InstallStatus.NOT_INSTALLED: return '#5C6BC0';
-      case InstallStatus.INSTALLING: return '#FF8C00';
-      case InstallStatus.INSTALLED: return '#107C10';
-      case InstallStatus.UPDATE_AVAILABLE: return '#D83B01';
-      case InstallStatus.FAILED: return '#D83B01';
-      default: return '#666666';
+  private packSubtitle(pack: InstalledModpack): string {
+    if (!pack.metaLoaded) {
+      return '解析中…';
     }
+    if (pack.info === null) {
+      return '无法识别的格式';
+    }
+    const bits: string[] = [];
+    if (pack.info.format === 'curseforge') {
+      bits.push('CurseForge');
+    } else if (pack.info.format === 'modrinth') {
+      bits.push('Modrinth');
+    }
+    if (pack.info.minecraftVersion.length > 0) {
+      bits.push('MC ' + pack.info.minecraftVersion);
+    }
+    if (pack.info.loader.length > 0) {
+      bits.push(pack.info.loader + ' ' + pack.info.loaderVersion);
+    }
+    if (pack.info.fileCount > 0) {
+      bits.push(pack.info.fileCount + ' 个文件');
+    }
+    if (pack.info.author.length > 0) {
+      bits.push(pack.info.author);
+    }
+    return bits.length > 0 ? bits.join(' · ') : pack.info.summary;
+  }
+
+  private applyToInstance(): void {
+    if (this.detail === null || this.detail.info === null) {
+      return;
+    }
+    this.applying = true;
+    this.applyNote = '正在解压并应用整合包…';
+    const pack = this.detail;
+    const root = `${this.mcDir()}/.modpack-tmp`;
+    void (async () => {
+      const info = await ModpackManager.inspect(pack, root);
+      if (info === null) {
+        this.applyNote = '解析失败，无法应用';
+        this.applying = false;
+        return;
+      }
+      const extractDir = root + '/mp-' + Math.abs(ModpackManager.hashOf(pack.fileName));
+      const n = ModpackManager.applyOverrides(info, extractDir, this.mcDir());
+      FileUtils.delete(root);
+      this.applyNote = '已应用 ' + n + ' 项到当前游戏目录';
+      this.applying = false;
+      this.detail = null;
+    })();
   }
 
   build() {
-    Column() {
-      // Header
-      Row() {
-        Text('Modpacks')
-          .fontSize(18)
-          .fontWeight(FontWeight.Bold)
-          .fontColor('#1A1A1A');
-        Blank();
-        Button({ type: ButtonType.Normal }) {
-          Text('+ Import')
-            .fontSize(13)
-            .fontColor('#5C6BC0')
-            .fontWeight(FontWeight.Medium);
-        }
-        .height(32)
-        .backgroundColor('#E8F4FD')
-        .borderRadius(16)
-        .padding({ left: 12, right: 12 })
-        .onClick(() => this.importModpack());
-      }
-      .width('100%')
-      .padding({ left: 16, right: 16, top: 8, bottom: 8 });
+    Stack() {
+      Column() {
+        this.HeaderView()
+        this.Toolbar()
 
-      // Search bar
-      SearchBar({ onSearch: (text: string) => this.onSearch(text) })
-        .padding({ left: 16, right: 16, bottom: 8 });
-
-      if (this.isLoading) {
-        Column() {
-          LoadingProgress()
-            .width(32)
-            .height(32)
-            .color('#5C6BC0');
-        }
-        .width('100%')
-        .height('100%')
-        .justifyContent(FlexAlign.Center)
-        .alignItems(HorizontalAlign.Center);
-      } else if (this.filteredModpacks.length === 0) {
-        EmptyView({
-          message: this.searchText.length > 0 ? 'No modpacks match your search' : 'No modpacks installed',
-          actionText: 'Import Modpack'
-        });
-      } else {
-        if (this.showDetail && this.selectedIndex >= 0) {
-          this.ModpackDetailView(this.filteredModpacks[this.selectedIndex]);
+        if (this.isLoading) {
+          LoadingView({ message: '扫描整合包目录…' })
+        } else if (this.packs.length === 0) {
+          EmptyView({ icon: '', message: this.parseNote.length > 0 ? this.parseNote : '还没有整合包', actionText: '刷新' })
         } else {
           List() {
-            ForEach(this.filteredModpacks, (modpack: ModpackInfo, index: number) => {
+            ForEach(this.visible(), (pack: InstalledModpack) => {
               ListItem() {
-                this.ModpackItemComponent(modpack, index);
+                this.PackRow(pack)
               }
-            }, (modpack: ModpackInfo) => modpack.name + modpack.version);
+            }, (pack: InstalledModpack) => `${pack.path}|${pack.metaLoaded ? '1' : '0'}`)
           }
-          .width('100%')
           .layoutWeight(1)
-          .divider({ strokeWidth: 0.5, color: '#E8E8E8', startMargin: 16, endMargin: 16 });
+          .width('100%')
+          .divider({ strokeWidth: 1, color: HmclTheme.OUTLINE_VARIANT, startMargin: 20 })
         }
+
+        if (this.applyNote.length > 0) {
+          Text(this.applyNote)
+            .fontSize(12)
+            .fontColor(HmclTheme.PRIMARY)
+            .width('100%')
+            .padding({ left: 20, right: 20, bottom: 6 });
+        }
+        if (this.error.length > 0) {
+          Text(this.error)
+            .fontSize(12)
+            .fontColor(HmclTheme.ERROR)
+            .width('100%')
+            .padding({ left: 20, right: 20, bottom: 8 });
+        }
+      }
+      .width('100%')
+      .height('100%')
+      .backgroundColor(HmclTheme.SURFACE)
+
+      if (this.detail !== null) {
+        this.DetailOverlay()
       }
     }
     .width('100%')
     .height('100%')
-    .backgroundColor('#FBF8FF');
   }
 
-  @Builder ModpackItemComponent(modpack: ModpackInfo, index: number) {
-    Row() {
-      // Modpack icon
-      Text(modpack.icon)
-        .fontSize(32);
-
-      // Modpack info
-      Column() {
-        Text(modpack.name)
+  @Builder
+  HeaderView() {
+    Column() {
+      Row() {
+        Text('整合包')
           .fontSize(15)
-          .fontWeight(FontWeight.Medium)
-          .fontColor('#1A1A1A');
-
-        Row() {
-          Text(`v${modpack.version}`)
-            .fontSize(12)
-            .fontColor('#999999');
-          Text(` | ${modpack.mcVersion}`)
-            .fontSize(12)
-            .fontColor('#999999')
-            .margin({ left: 4 });
-          Text(` | ${modpack.modLoader}`)
-            .fontSize(12)
-            .fontColor('#999999')
-            .margin({ left: 4 });
-          Text(` | ${modpack.modCount} mods`)
-            .fontSize(12)
-            .fontColor('#999999')
-            .margin({ left: 4 });
-        }
-        .margin({ top: 2 });
-
-        Text(modpack.description)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(HmclTheme.ON_SURFACE);
+        Text(` ${this.packs.length} 个`)
           .fontSize(12)
-          .fontColor('#666666')
-          .margin({ top: 2 })
-          .maxLines(1)
-          .textOverflow({ overflow: TextOverflow.Ellipsis });
-      }
-      .margin({ left: 12 })
-      .alignItems(HorizontalAlign.Start)
-      .layoutWeight(1);
-
-      // Status/action button
-      if (modpack.installStatus === InstallStatus.INSTALLING) {
-        Column() {
-          ProgressBar({ progress: modpack.installProgress, showLabel: true });
-        }
-        .width(80);
-      } else {
-        Button(this.getStatusLabel(modpack.installStatus))
-          .height(30)
-          .backgroundColor(this.getStatusColor(modpack.installStatus))
-          .fontColor(Color.White)
+          .fontColor(HmclTheme.ON_SURFACE_VARIANT);
+        Blank();
+        Text('刷新')
           .fontSize(12)
-          .borderRadius(6)
+          .fontColor(HmclTheme.PRIMARY)
           .onClick(() => {
-            if (modpack.installStatus === InstallStatus.NOT_INSTALLED) {
-              this.installModpack(index);
-            } else if (modpack.installStatus === InstallStatus.UPDATE_AVAILABLE) {
-              this.updateModpack(index);
-            }
+            this.reload();
           });
       }
+      .width('100%');
+
+      Text(ModpackManager.modpacksDir(this.mcDir()))
+        .fontSize(11)
+        .fontColor(HmclTheme.OUTLINE)
+        .width('100%')
+        .maxLines(1)
+        .textOverflow({ overflow: TextOverflow.Ellipsis })
+        .margin({ top: 4 });
+
+      if (this.parseNote.length > 0) {
+        Text(this.parseNote)
+          .fontSize(11)
+          .fontColor(HmclTheme.PRIMARY)
+          .width('100%')
+          .margin({ top: 4 });
+      }
     }
     .width('100%')
-    .padding({ left: 16, right: 16, top: 10, bottom: 10 })
-    .backgroundColor(Color.White)
-    .onClick(() => this.viewDetails(index));
+    .padding({ left: 20, right: 20, top: 16, bottom: 10 })
   }
 
-  @Builder ModpackDetailView(modpack: ModpackInfo) {
-    Column() {
-      Scroll() {
-        Column() {
-          // Back button
-          Row() {
-            Button({ type: ButtonType.Normal }) {
-              Text('← Back')
-                .fontSize(14)
-                .fontColor('#5C6BC0');
-            }
-            .backgroundColor(Color.Transparent);
-            Blank();
-          }
-          .width('100%')
-          .padding({ top: 8, bottom: 8 });
+  @Builder
+  Toolbar() {
+    Row() {
+      TextInput({ placeholder: '搜索整合包…', text: this.searchText })
+        .layoutWeight(1)
+        .height(34)
+        .fontSize(13)
+        .backgroundColor(HmclTheme.SURFACE_CONTAINER)
+        .borderRadius(8)
+        .onChange((v: string) => {
+          this.searchText = v;
+        });
+    }
+    .width('100%')
+    .padding({ left: 20, right: 20, bottom: 8 })
+  }
 
-          // Modpack header
-          Column() {
-            Card() {
-              Column() {
-                Row() {
-                  Text(modpack.icon)
-                    .fontSize(48);
+  @Builder
+  PackRow(pack: InstalledModpack) {
+    Row() {
+      Column() {
+        Text(this.packTitle(pack))
+          .fontSize(14)
+          .fontWeight(FontWeight.Medium)
+          .fontColor(HmclTheme.ON_SURFACE)
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+          .width('100%');
 
-                  Column() {
-                    Text(modpack.name)
-                      .fontSize(22)
-                      .fontWeight(FontWeight.Bold)
-                      .fontColor('#1A1A1A');
-
-                    Text(`by ${modpack.author}`)
-                      .fontSize(14)
-                      .fontColor('#666666')
-                      .margin({ top: 2 });
-                  }
-                  .margin({ left: 16 })
-                  .alignItems(HorizontalAlign.Start);
-                }
-                .width('100%');
-
-                Text(modpack.description)
-                  .fontSize(14)
-                  .fontColor('#666666')
-                  .width('100%')
-                  .margin({ top: 16 });
-              }
-              .width('100%');
-            }
-          }
-          .padding(16);
-
-          Column() {
-            Card() {
-              Column() {
-                this.DetailRow('Version', modpack.version);
-                this.DetailRow('Minecraft', modpack.mcVersion);
-                this.DetailRow('Mod Loader', modpack.modLoader);
-                this.DetailRow('Mod Count', `${modpack.modCount} mods`);
-                this.DetailRow('Source', modpack.source);
-                this.DetailRow('Status', this.getStatusLabel(modpack.installStatus));
-              }
-              .width('100%');
-            }
-          }
-          .padding(16);
-
-          // Install progress
-          if (modpack.installStatus === InstallStatus.INSTALLING) {
-            Column() {
-              Card() {
-                Column() {
-                  Text('Installation Progress')
-                    .fontSize(14)
-                    .fontWeight(FontWeight.Medium)
-                    .fontColor('#1A1A1A')
-                    .margin({ bottom: 8 });
-
-                  ProgressBar({ progress: modpack.installProgress, showLabel: true });
-                }
-                .width('100%');
-              }
-            }
-            .padding(16);
-          }
-
-          // Action buttons
-          Row() {
-            if (modpack.installStatus === InstallStatus.NOT_INSTALLED) {
-              Button('Install')
-                .height(44)
-                .backgroundColor('#5C6BC0')
-                .fontColor(Color.White)
-                .fontSize(15)
-                .fontWeight(FontWeight.Medium)
-                .borderRadius(8)
-                .layoutWeight(1)
-                .onClick(() => this.installModpack(this.selectedIndex));
-            } else if (modpack.installStatus === InstallStatus.UPDATE_AVAILABLE) {
-              Button('Update')
-                .height(44)
-                .backgroundColor('#D83B01')
-                .fontColor(Color.White)
-                .fontSize(15)
-                .fontWeight(FontWeight.Medium)
-                .borderRadius(8)
-                .layoutWeight(1)
-                .onClick(() => this.updateModpack(this.selectedIndex));
-            } else if (modpack.installStatus === InstallStatus.INSTALLED) {
-              Button('Update Available')
-                .height(44)
-                .backgroundColor('#107C10')
-                .fontColor(Color.White)
-                .fontSize(15)
-                .fontWeight(FontWeight.Medium)
-                .borderRadius(8)
-                .layoutWeight(1)
-                .enabled(false);
-            }
-          }
-          .width('100%')
-          .padding({ top: 16 });
+        Row() {
+          Text(this.packSubtitle(pack))
+            .fontSize(11)
+            .fontColor(HmclTheme.ON_SURFACE_VARIANT)
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .layoutWeight(1);
+          Text(StringUtils.formatSize(pack.sizeBytes))
+            .fontSize(10)
+            .fontColor(HmclTheme.OUTLINE)
+            .margin({ left: 6 });
         }
         .width('100%')
-        .padding({ left: 16, right: 16, bottom: 24 });
+        .margin({ top: 3 });
       }
-      .width('100%')
-      .height('100%');
+      .layoutWeight(1);
+
+      Text('详情')
+        .fontSize(12)
+        .fontColor(HmclTheme.PRIMARY)
+        .padding({ left: 8, right: 8, top: 6, bottom: 6 })
+        .onClick(() => {
+          this.detail = pack;
+          this.applyNote = '';
+        });
+
+      Text('删除')
+        .fontSize(12)
+        .fontColor(HmclTheme.ERROR)
+        .padding({ left: 8, right: 8, top: 6, bottom: 6 })
+        .onClick(() => {
+          ModpackManager.delete(pack);
+          this.packs = ModpackManager.scan(this.mcDir());
+        });
     }
     .width('100%')
-    .height('100%');
+    .height(64)
+    .padding({ left: 20, right: 12 })
   }
 
-  @Builder DetailRow(label: string, value: string) {
+  @Builder
+  DetailOverlay() {
+    Column() {
+      Text(this.detail ? this.packTitle(this.detail) : '')
+        .fontSize(16)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(HmclTheme.ON_SURFACE)
+        .width('100%');
+      Text(this.detail ? this.detail.fileName : '')
+        .fontSize(11)
+        .fontColor(HmclTheme.OUTLINE)
+        .width('100%')
+        .margin({ top: 4 });
+
+      Divider().color(HmclTheme.OUTLINE_VARIANT).margin({ top: 12, bottom: 8 });
+
+      this.InfoRow('格式', this.detail && this.detail.info !== null ? this.detail.info.format : '未识别');
+      this.InfoRow('MC 版本', this.detail && this.detail.info !== null ? this.detail.info.minecraftVersion : '');
+      this.InfoRow('加载器', this.detail && this.detail.info !== null
+        ? `${this.detail.info.loader} ${this.detail.info.loaderVersion}` : '');
+      this.InfoRow('作者', this.detail && this.detail.info !== null ? this.detail.info.author : '');
+      this.InfoRow('版本', this.detail && this.detail.info !== null ? this.detail.info.version : '');
+      this.InfoRow('声明文件', this.detail && this.detail.info !== null
+        ? this.detail.info.fileCount.toString() : '');
+      this.InfoRow('含 overrides', this.detail && this.detail.info !== null
+        ? (this.detail.info.hasOverrides ? '是' : '否') : '');
+      this.InfoRow('大小', this.detail ? StringUtils.formatSize(this.detail.sizeBytes) : '');
+      this.InfoRow('路径', this.detail ? this.detail.path : '');
+
+      if (this.applying) {
+        LoadingProgress()
+          .width(20)
+          .height(20)
+          .color(HmclTheme.PRIMARY_CONTAINER)
+          .margin({ top: 14 });
+      } else {
+        Button('安装到当前实例')
+          .width('100%')
+          .height(38)
+          .fontSize(13)
+          .fontColor(HmclTheme.ON_PRIMARY_CONTAINER)
+          .backgroundColor(HmclTheme.PRIMARY_CONTAINER)
+          .borderRadius(10)
+          .margin({ top: 16 })
+          .onClick(() => {
+            this.applyToInstance();
+          });
+      }
+
+      Button('关闭')
+        .width('100%')
+        .height(38)
+        .fontSize(13)
+        .fontColor(HmclTheme.ON_SURFACE_VARIANT)
+        .backgroundColor(HmclTheme.SURFACE_CONTAINER)
+        .borderRadius(10)
+        .margin({ top: 10 })
+        .onClick(() => {
+          this.detail = null;
+        });
+    }
+    .width(470)
+    .padding(22)
+    .backgroundColor(HmclTheme.SURFACE_CONTAINER_LOWEST)
+    .borderRadius(HmclTheme.CARD_RADIUS)
+    .shadow({ radius: 24, color: '#33000000', offsetX: 0, offsetY: 8 })
+  }
+
+  @Builder
+  InfoRow(label: string, value: string) {
     Row() {
       Text(label)
-        .fontSize(14)
-        .fontColor('#666666')
-        .width(100);
-      Text(value)
-        .fontSize(14)
-        .fontColor('#1A1A1A');
+        .fontSize(12)
+        .fontColor(HmclTheme.ON_SURFACE_VARIANT)
+        .width(80);
+      Text(value.length > 0 ? value : '—')
+        .fontSize(12)
+        .fontColor(HmclTheme.ON_SURFACE)
+        .layoutWeight(1)
+        .maxLines(2)
+        .textOverflow({ overflow: TextOverflow.Ellipsis });
     }
     .width('100%')
-    .height(32);
+    .padding({ top: 5, bottom: 5 })
   }
 }
