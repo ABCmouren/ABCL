@@ -8,6 +8,7 @@
  *   - 崩溃报告单独一栏（crash-reports/）
  */
 import { Logger, StringUtils } from '../../core/util/Utils';
+import { CrashReporter, CrashEntry } from '../../core/util/CrashReporter';
 import { GameDirectory } from '../../core/game/GameDirectory';
 import { VersionManager } from '../../core/game/VersionManager';
 import { FileUtils } from '../../core/util/Utils';
@@ -30,6 +31,7 @@ export default struct LogPage {
   @State minLevel: string = 'ALL';
   @State autoScroll: boolean = true;
   @State crashFiles: string[] = [];
+  @State crashEntries: CrashEntry[] = [];
   @State crashDetail: string = '';
   @State message: string = '';
 
@@ -62,16 +64,9 @@ export default struct LogPage {
   }
 
   private loadCrashes(): void {
-    const dir = GameDirectory.subPath(this.versionManager.getMinecraftDir(), 'crash-reports');
-    if (!FileUtils.exists(dir)) {
-      this.crashFiles = [];
-      return;
-    }
-    const list = FileUtils.listDir(dir)
-      .filter((f: string) => f.endsWith('.txt') || f.endsWith('.log'))
-      .sort()
-      .reverse();
-    this.crashFiles = list;
+    const all = CrashReporter.collect(this.versionManager.getMinecraftDir());
+    this.crashEntries = all;
+    this.crashFiles = all.map((e: CrashEntry) => e.title);
   }
 
   private source(): LogSource {
