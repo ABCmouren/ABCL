@@ -753,7 +753,7 @@ export default struct GameListPage {
 
       const context = this.getUIContext().getHostContext() as common.UIAbilityContext;
       // 旧代码把 bundleName 硬编码成 'com.hmcl.launcher'（AppScope 里早已改成
-      // com.abcmouren.HMCL_HarmonyOS），startAbility 必然失败。
+      // com.abcmouren.abcl），startAbility 必然失败。
       const wantParams: Record<string, string> = {} as Record<string, string>;
       wantParams['versionId'] = inst.versionId;
       const want: Want = {

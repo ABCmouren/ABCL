@@ -1,5 +1,5 @@
 /**
- * Launcher configuration model for HMCL-HarmonyOS
+ * Launcher configuration model for ABCL
  */
 
 import { DownloadSource } from './GameVersion';

@@ -1,4 +1,4 @@
-// Store for HMCL-HarmonyOS global state
+// Store for ABCL global state
 import { Account } from '../model/Account';
 import { GameInstallation } from '../model/GameVersion';
 import { LauncherConfig, DefaultConfig } from '../model/LauncherConfig';

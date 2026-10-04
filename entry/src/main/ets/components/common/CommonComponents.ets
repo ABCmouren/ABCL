@@ -1,4 +1,4 @@
-// Common UI components for HMCL-HarmonyOS
+// Common UI components for ABCL
 
 // Version type badge component
 @Component

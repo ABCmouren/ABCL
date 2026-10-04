@@ -1,5 +1,5 @@
 /**
- * HttpClient — HMCL-HarmonyOS 网络层（2026-10 重写）
+ * HttpClient — ABCL 网络层（2026-10 重写）
  *
  * 旧实现的两个致命问题：
  *  1. downloadFile 用 expectDataType=ARRAY_BUFFER 把整个文件读进内存再落盘，
@@ -32,7 +32,7 @@ export interface DownloadOutcome {
 export type DownloadProgressFn = (received: number, total: number) => void;
 
 export class HttpClient {
-  static readonly USER_AGENT = 'HMCL-HarmonyOS/2.0.0 (HarmonyOS; +https://github.com/ABCmouren/HMCL-HarmonyOS)';
+  static readonly USER_AGENT = 'ABCL/2.0.0 (HarmonyOS; +https://github.com/ABCmouren/ABCL)';
   static readonly CONNECT_TIMEOUT = 20000;
   static readonly READ_TIMEOUT = 30000;
   /** 大文件下载：单次请求的读超时（收不到任何字节才算超时） */

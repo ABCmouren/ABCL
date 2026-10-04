@@ -1,4 +1,4 @@
-// Game version management for HMCL-HarmonyOS
+// Game version management for ABCL
 import { GameInstallation, VersionManifest, GameVersionJson, LoaderType, Library, DownloadSource } from '../../model/GameVersion';
 import { AppStore } from '../AppStore';
 import { Logger, FileUtils } from '../util/Utils';
@@ -387,7 +387,7 @@ export class VersionManager {
   }
 }
 
-// Mod manager for HMCL-HarmonyOS
+// Mod manager for ABCL
 export class ModManager {
   private static readonly TAG = 'ModManager';
 

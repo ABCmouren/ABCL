@@ -1,4 +1,4 @@
-# HMCL-HarmonyOS 🚀
+# ABCL 🚀
 
 > **Hello Minecraft! Launcher — 鸿蒙原生版**
 >
@@ -15,7 +15,7 @@
 
 ## 📋 概述
 
-HMCL-HarmonyOS 是 [HMCL](https://github.com/HMCL-dev/HMCL)（Hello Minecraft! Launcher）的鸿蒙原生移植版，参考了 [AMCL](https://github.com/LZZLHY/amcl)（Axe Minecraft Launcher）的实现。**AMCL 的源码是公开的**（`MyApplication/JavaApp/src/com/amcl/launcher/` 是 Java 启动层，`MyApplication/entry/src/main/cpp/` 是 native 层），因此本项目可以直接对齐它的启动契约与资源版本。HMCL-HarmonyOS 使用 **ArkTS + ArkUI** 构建 UI，通过 **NAPI C++ 桥接层** 加载 `libjvm.so` 创建 JVM 来运行 Minecraft Java Edition。
+ABCL 是 [HMCL](https://github.com/HMCL-dev/HMCL)（Hello Minecraft! Launcher）的鸿蒙原生移植版，参考了 [AMCL](https://github.com/LZZLHY/amcl)（Axe Minecraft Launcher）的实现。**AMCL 的源码是公开的**（`MyApplication/JavaApp/src/com/amcl/launcher/` 是 Java 启动层，`MyApplication/entry/src/main/cpp/` 是 native 层），因此本项目可以直接对齐它的启动契约与资源版本。ABCL 使用 **ArkTS + ArkUI** 构建 UI，通过 **NAPI C++ 桥接层** 加载 `libjvm.so` 创建 JVM 来运行 Minecraft Java Edition。
 
 ### 与 AMCL 上游的同步状态
 
@@ -158,7 +158,7 @@ launchFromPending() → 调用 LaunchEngine.launch()
 ## 📁 项目结构
 
 ```
-HMCL-HarmonyOS/
+ABCL/
 ├── entry/
 │   └── src/
 │       └── main/

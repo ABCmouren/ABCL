@@ -1,4 +1,4 @@
-// Settings page for HMCL-HarmonyOS
+// Settings page for ABCL
 import { LauncherConfig, DefaultConfig, ThemeMode } from '../../model/LauncherConfig';
 import { DownloadSource } from '../../model/GameVersion';
 import { AppStore } from '../../core/AppStore';
@@ -217,10 +217,10 @@ export default struct SettingsPage {
           SectionHeader({ title: 'About' });
           Card() {
             Column() {
-              this.InfoRowStatic('HMCL-HarmonyOS', 'v1.0.0');
+              this.InfoRowStatic('ABCL', 'v2.0.0');
               this.InfoRowStatic('Developer', 'Ported from HMCL');
               this.InfoRowStatic('License', 'GPL-3.0');
-              this.InfoRowStatic('Source', 'github.com/HMCL-dev/HMCL');
+              this.InfoRowStatic('Source', 'github.com/ABCmouren/ABCL');
             }
             .width('100%');
           };

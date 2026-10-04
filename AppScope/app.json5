@@ -1,9 +1,9 @@
 {
   "app": {
-    "bundleName": "com.abcmouren.HMCL_HarmonyOS",
-    "vendor": "HMCL-Harmony",
-    "versionCode": 1000000,
-    "versionName": "1.0.0",
+    "bundleName": "com.abcmouren.abcl",
+    "vendor": "ABCL",
+    "versionCode": 2000000,
+    "versionName": "2.0.0",
     "icon": "$media:app_icon",
     "label": "$string:app_name"
   }

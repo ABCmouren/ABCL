@@ -1,5 +1,5 @@
 /**
- * JDK Runtime Manager for HMCL-HarmonyOS
+ * JDK Runtime Manager for ABCL
  * Handles downloading and verifying JDK runtimes from mc-ohos-resources
  * Extraction priority: rawfile (bundled in HAP) → network download (fallback)
  */

@@ -1,5 +1,5 @@
 /**
- * HMCL-HarmonyOS Game Launch Engine
+ * ABCL Game Launch Engine
  *
  * Bridges ArkTS UI with the native JVM launcher (hmcl_native)
  * via the NativeBridge wrapper.

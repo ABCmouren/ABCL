@@ -1,8 +1,8 @@
-# HMCL-HarmonyOS 移植项目 - 完整总结报告
+# ABCL 移植项目 - 完整总结报告
 
 ## 📋 项目概述
 
-**项目名称**: HMCL-HarmonyOS (Hello Minecraft! Launcher for HarmonyOS NEXT)  
+**项目名称**: ABCL (Hello Minecraft! Launcher for HarmonyOS NEXT)  
 **源项目**: HMCL (https://github.com/HMCL-dev/HMCL)  
 **目标平台**: 纯血鸿蒙 (HarmonyOS NEXT / API 12+)  
 **开发语言**: ArkTS (TypeScript 超集)  
@@ -17,7 +17,7 @@
 ### 目录结构
 
 ```
-HMCL-HarmonyOS/
+ABCL/
 ├── AppScope/
 │   └── app.json5              # 应用级配置
 ├── entry/
@@ -139,7 +139,7 @@ HMCL-HarmonyOS/
 
 ### HMCL → HarmonyOS 核心映射
 
-| HMCL (Java/JavaFX) | HMCL-HarmonyOS (ArkTS/ArkUI) |
+| HMCL (Java/JavaFX) | ABCL (ArkTS/ArkUI) |
 |-------------------|----------------------------|
 | `UIAbility` / `Activity` | `UIAbility` (Stage 模型) |
 | JavaFX `Stage`/`Scene` | `WindowStage` / `Window` |

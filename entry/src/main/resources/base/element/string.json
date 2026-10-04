@@ -2,15 +2,15 @@
   "string": [
     {
       "name": "EntryAbility_desc",
-      "value": "HMCL - Hello Minecraft! Launcher"
+      "value": "ABCL - Minecraft Java Edition Launcher"
     },
     {
       "name": "EntryAbility_label",
-      "value": "HMCL"
+      "value": "ABCL"
     },
     {
       "name": "app_name",
-      "value": "HMCL"
+      "value": "ABCL"
     },
     {
       "name": "module_desc",

@@ -1,4 +1,4 @@
-// Authentication service for HMCL-HarmonyOS
+// Authentication service for ABCL
 import { Account, AuthResult, UserType } from '../../model/Account';
 import { AppStore } from '../AppStore';
 import { HttpClient, HttpResult } from '../network/HttpClient';

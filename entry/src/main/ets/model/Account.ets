@@ -1,5 +1,5 @@
 /**
- * Minecraft account model for HMCL-HarmonyOS
+ * Minecraft account model for ABCL
  */
 
 export enum UserType {

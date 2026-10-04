@@ -1,5 +1,5 @@
 /**
- * Download JDK runtimes for HMCL-HarmonyOS
+ * Download JDK runtimes for ABCL
  *
  * Downloads OHOS ARM64 JDK ZIPs from mc-ohos-resources (by LZZLHY)
  * and places them in entry/src/main/resources/rawfile/ for HAP bundling.
@@ -82,7 +82,7 @@ function downloadFile(url, destPath) {
 }
 
 async function main() {
-  console.log('=== HMCL-HarmonyOS JDK Downloader ===\n');
+  console.log('=== ABCL JDK Downloader ===\n');
   console.log(`Rawfile directory: ${RAWFILE_DIR}\n`);
 
   // Create rawfile directory if needed

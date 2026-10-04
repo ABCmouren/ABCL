@@ -1,5 +1,5 @@
 /**
- * Minecraft version models for HMCL-HarmonyOS
+ * Minecraft version models for ABCL
  */
 
 export interface VersionManifestLatest {

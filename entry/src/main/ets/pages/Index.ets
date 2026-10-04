@@ -61,11 +61,11 @@ struct Index {
       .backgroundColor(HmclTheme.PRIMARY_CONTAINER)
       .margin({ right: 10 });
 
-      Text('HMCL')
+      Text('ABCL')
         .fontSize(15)
         .fontWeight(FontWeight.Bold)
         .fontColor(HmclTheme.ON_SURFACE);
-      Text(' — Hello Minecraft! Launcher')
+      Text(' — A Minecraft Java Edition Launcher')
         .fontSize(12)
         .fontColor(HmclTheme.ON_SURFACE_VARIANT)
         .margin({ left: 6 });
@@ -186,7 +186,7 @@ struct Index {
   @Builder
   StatusBar() {
     Row() {
-      Text('HMCL-HarmonyOS 2.0.0')
+      Text('ABCL 2.0.0')
         .fontSize(11)
         .fontColor(HmclTheme.ON_SURFACE_VARIANT);
       Blank();

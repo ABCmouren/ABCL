@@ -4,7 +4,7 @@
   "modelVersion": "5.0.0",
   "description": "HMCL - Hello Minecraft! Launcher entry module",
   "main": "",
-  "author": "HMCL-Harmony",
+  "author": "ABCL",
   "license": "GPL-3.0",
   "dependencies": {}
 }

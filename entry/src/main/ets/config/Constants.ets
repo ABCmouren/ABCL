@@ -1,5 +1,5 @@
 /**
- * Constants and configuration for HMCL-HarmonyOS
+ * Constants and configuration for ABCL
  */
 
 export class Constants {
@@ -73,7 +73,7 @@ export class Constants {
 
   // 应用沙箱根目录：由 EntryAbility 在启动时用 context.filesDir 注入。
   // 旧代码把它硬编码成 '/data/app/el2/100/base/com.hmcl.launcher/'，
-  // 而 AppScope 的 bundleName 早已改成 com.abcmouren.HMCL_HarmonyOS，
+  // 而 AppScope 的 bundleName 早已改成 com.abcmouren.abcl，
   // 该路径在设备上不存在 → 所有默认游戏目录都写不进去。
   static appDir: string = '';
   static readonly MINECRAFT_DIR = 'minecraft';

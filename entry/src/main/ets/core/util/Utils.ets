@@ -1,4 +1,4 @@
-// Utility functions for HMCL-HarmonyOS
+// Utility functions for ABCL
 // 2026-10 重写：修复 UTF-8 解码、大文件读取栈溢出、递归删除、解压、SHA-1 校验
 import fs from '@ohos.file.fs';
 import util from '@ohos.util';
@@ -432,6 +432,17 @@ export class StringUtils {
 
   static formatSpeed(bytesPerSec: number): string {
     return `${StringUtils.formatSize(bytesPerSec)}/s`;
+  }
+
+  /** 计数（下载量/订阅数）格式化：1.2万 / 254.8万 / 3.12亿 */
+  static formatCount(value: number): string {
+    if (value < 10000) {
+      return value.toString();
+    }
+    if (value < 100000000) {
+      return `${(value / 10000).toFixed(1)}万`;
+    }
+    return `${(value / 100000000).toFixed(2)}亿`;
   }
 
   static formatTime(ms: number): string {

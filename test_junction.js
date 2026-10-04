@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const cacheOhos = 'C:\\Users\\liwan\\.hvigor\\project_caches\\5c7f5024a162612aa23f2261029cac9a\\workspace\\node_modules\\@ohos';
-const target = 'C:\\xm\\HMCL-HarmonyOS\\hvigor';
+const target = 'C:\\xm\\ABCL\\hvigor';
 const dest = cacheOhos + '\\hvigor';
 
 // Create directories

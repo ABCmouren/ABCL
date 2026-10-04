@@ -29,3 +29,8 @@ build-profile.json5.local
 # Temp files
 *.tmp
 *.bak
+
+# 凭据（绝不提交）
+.secrets/
+*.token
+*.pat

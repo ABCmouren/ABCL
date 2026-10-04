@@ -1,5 +1,5 @@
 /**
- * Download task model for HMCL-HarmonyOS
+ * Download task model for ABCL
  * Re-exports types from GameVersion for convenience
  */
 export { DownloadTask, DownloadProgress, DownloadSource } from './GameVersion';
