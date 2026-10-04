@@ -61,6 +61,56 @@ export class Mirrors {
   }
 
   /** 给定主 URL，返回可用的镜像候选列表（去重、去空） */
+  // ============================================================
+  //  模组平台镜像（照搬 HMCL 的 MirrorRule）
+  //
+  //  HMCL 的 CurseForge / Modrinth 之所以「不需要 API Key」，
+  //  是因为它把请求改写到 mcimirror 上；官方 api.curseforge.com
+  //  是必须有 key 的（HMCL 的 key 构建时打进 jar，源码里看不到）。
+  //
+  //  https://github.com/mcmod-info-mirror/mcim-rust-api
+  // ============================================================
+  static readonly MCIMIRROR_ORIGIN = 'https://mod.mcimirror.top';
+  static readonly MODRINTH_OFFICIAL = 'https://api.modrinth.com/v2';
+  static readonly MODRINTH_MIRROR = 'https://mod.mcimirror.top/modrinth/v2';
+  static readonly CURSEFORGE_OFFICIAL = 'https://api.curseforge.com/v1';
+  static readonly CURSEFORGE_MIRROR = 'https://mod.mcimirror.top/curseforge/v1';
+
+  /** Modrinth API 根地址（enableMirror 时走 mcimirror，国内更快且无需 UA 规避） */
+  static modrinthBase(enableMirror: boolean): string {
+    return enableMirror ? Mirrors.MODRINTH_MIRROR : Mirrors.MODRINTH_OFFICIAL;
+  }
+
+  /**
+   * CurseForge API 根地址。
+   * 镜像源不需要 API Key；官方源必须有 key（由用户自备）。
+   */
+  static curseforgeBase(enableMirror: boolean): string {
+    return enableMirror ? Mirrors.CURSEFORGE_MIRROR : Mirrors.CURSEFORGE_OFFICIAL;
+  }
+
+  /**
+   * 把下载直链改写到镜像。
+   * 对应 HMCL 的：
+   *   cdn.modrinth.com  → mod.mcimirror.top
+   *   edge.forgecdn.net → mod.mcimirror.top
+   */
+  static rewriteDownloadUrl(url: string, enableMirror: boolean): string {
+    if (!enableMirror || url.length === 0) {
+      return url;
+    }
+    if (url.startsWith('https://cdn.modrinth.com')) {
+      return url.replace('https://cdn.modrinth.com', Mirrors.MCIMIRROR_ORIGIN);
+    }
+    if (url.startsWith('https://edge.forgecdn.net')) {
+      return url.replace('https://edge.forgecdn.net', Mirrors.MCIMIRROR_ORIGIN);
+    }
+    if (url.startsWith('https://mediafilez.forgecdn.net')) {
+      return url.replace('https://mediafilez.forgecdn.net', Mirrors.MCIMIRROR_ORIGIN);
+    }
+    return url;
+  }
+
   static candidates(primary: string, enableMirror: boolean): string[] {
     const list: string[] = [];
     if (primary && primary.length > 0) {

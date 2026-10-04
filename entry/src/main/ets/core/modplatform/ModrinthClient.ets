@@ -7,6 +7,7 @@
  * 注意：Modrinth 要求带 User-Agent，否则会被限流。
  */
 import { HttpClient } from '../network/HttpClient';
+import { Mirrors } from '../network/Mirrors';
 import { Logger } from '../util/Utils';
 
 export interface ModrinthSearchHit {
@@ -95,7 +96,20 @@ export interface ModrinthSearchPage {
 
 export class ModrinthClient {
   private static readonly TAG = 'Modrinth';
-  private static readonly BASE = 'https://api.modrinth.com/v2';
+  /**
+   * 默认走 mcimirror 镜像（对应 HMCL 的
+   *   new MirrorRule("https://api.modrinth.com", "https://mod.mcimirror.top/modrinth", true)）。
+   * 国内更快，且不用为 Modrinth 的 UA 限流操心。
+   */
+  private static useMirror: boolean = true;
+
+  static setUseMirror(on: boolean): void {
+    ModrinthClient.useMirror = on;
+  }
+
+  static base(): string {
+    return Mirrors.modrinthBase(ModrinthClient.useMirror);
+  }
   /** HMCL DownloadListPage 用的就是 50 */
   static readonly PAGE_SIZE = 50;
 
@@ -156,7 +170,7 @@ export class ModrinthClient {
     parts.push(`index=${sort}`);
     parts.push(`offset=${pageOffset * pageSize}`);
     parts.push(`limit=${pageSize}`);
-    const url = `${ModrinthClient.BASE}/search?${parts.join('&')}`;
+    const url = `${ModrinthClient.base()}/search?${parts.join('&')}`;
 
     const res = await HttpClient.getJson<ModrinthSearchResult>(url, ModrinthClient.headers());
     if (!res.success || !res.data) {
@@ -179,7 +193,7 @@ export class ModrinthClient {
 
   /** 分类列表（按 project_type 过滤） */
   static async getCategories(projectType: string): Promise<ModrinthCategory[]> {
-    const res = await HttpClient.getJson<ModrinthCategory[]>(`${ModrinthClient.BASE}/tag/category`, ModrinthClient.headers());
+    const res = await HttpClient.getJson<ModrinthCategory[]>(`${ModrinthClient.base()}/tag/category`, ModrinthClient.headers());
     if (!res.success || !res.data) {
       Logger.warn(ModrinthClient.TAG, `分类拉取失败: ${res.error}`);
       return [];
@@ -195,7 +209,7 @@ export class ModrinthClient {
 
   /** 全部游戏版本（含快照），按接口返回顺序（新的在前） */
   static async getGameVersions(): Promise<ModrinthGameVersionTag[]> {
-    const res = await HttpClient.getJson<ModrinthGameVersionTag[]>(`${ModrinthClient.BASE}/tag/game_version`, ModrinthClient.headers());
+    const res = await HttpClient.getJson<ModrinthGameVersionTag[]>(`${ModrinthClient.base()}/tag/game_version`, ModrinthClient.headers());
     if (!res.success || !res.data) {
       Logger.warn(ModrinthClient.TAG, `游戏版本标签拉取失败: ${res.error}`);
       return [];
@@ -205,7 +219,7 @@ export class ModrinthClient {
 
   /** 加载器列表（按 project_type 过滤） */
   static async getLoaders(projectType: string): Promise<string[]> {
-    const res = await HttpClient.getJson<ModrinthLoaderTag[]>(`${ModrinthClient.BASE}/tag/loader`, ModrinthClient.headers());
+    const res = await HttpClient.getJson<ModrinthLoaderTag[]>(`${ModrinthClient.base()}/tag/loader`, ModrinthClient.headers());
     if (!res.success || !res.data) {
       Logger.warn(ModrinthClient.TAG, `加载器标签拉取失败: ${res.error}`);
       return [];
@@ -222,7 +236,7 @@ export class ModrinthClient {
 
   /** 取某个项目在指定 MC 版本 / 加载器下的可用版本（按发布时间倒序） */
   static async getVersions(projectId: string, gameVersion: string, loader: string): Promise<ModrinthVersion[]> {
-    let url = `${ModrinthClient.BASE}/project/${projectId}/version`;
+    let url = `${ModrinthClient.base()}/project/${projectId}/version`;
     const params: string[] = [];
     if (gameVersion.length > 0) {
       params.push(`game_versions=${encodeURIComponent('["' + gameVersion + '"]')}`);
@@ -241,16 +255,28 @@ export class ModrinthClient {
     return res.data;
   }
 
-  /** 取主文件（primary 优先，否则第一个） */
+  /** 取主文件（primary 优先，否则第一个），并把直链改写到镜像 */
   static primaryFile(version: ModrinthVersion): ModrinthFile | null {
     if (!version.files || version.files.length === 0) {
       return null;
     }
+    let picked: ModrinthFile | null = null;
     for (const f of version.files) {
       if (f.primary) {
-        return f;
+        picked = f;
+        break;
       }
     }
-    return version.files[0];
+    if (picked === null) {
+      picked = version.files[0];
+    }
+    const rewritten: ModrinthFile = {
+      hashes: picked.hashes,
+      url: Mirrors.rewriteDownloadUrl(picked.url, ModrinthClient.useMirror),
+      filename: picked.filename,
+      size: picked.size,
+      primary: picked.primary
+    };
+    return rewritten;
   }
 }

@@ -268,15 +268,6 @@ export default struct DownloadPage {
       const version = this.filterVersion.length > 0 ? this.filterVersion : mc;
       const loaderEff = this.filterLoader.length > 0 ? this.filterLoader : loader;
 
-      if (this.remoteSource === 'curseforge' && !this.cfKeyConfigured) {
-        this.modHits = [];
-        this.modTotal = 0;
-        this.modPageCount = 0;
-        this.modError = 'CurseForge 需要 API Key（在 curseforge.com 申请后，点上面的「CurseForge Key」填入）';
-        this.modLoading = false;
-        return;
-      }
-
       const result = this.remoteSource === 'curseforge'
         ? await CurseForgeClient.search(query, projectType, version, loaderEff, page,
             CurseForgeClient.PAGE_SIZE, this.modSort, this.filterCategoryId)
@@ -303,9 +294,10 @@ export default struct DownloadPage {
         this.modNote = `共 ${result.totalHits} 个结果${filter} · 第 ${result.offset + 1}/${result.pageCount} 页`;
       }
       Logger.info('DownloadPage',
-        `Modrinth 搜索 ${projectType} page=${result.offset} 命中 ${this.modHits.length}/${result.totalHits}`);
+        `${this.remoteSource === 'curseforge' ? 'CurseForge' : 'Modrinth'} 搜索 ${projectType} ` +
+        `page=${result.offset} 命中 ${this.modHits.length}/${result.totalHits}`);
     } catch (e) {
-      this.modError = 'Modrinth 搜索失败：' + (e as Error).message;
+      this.modError = '搜索失败：' + (e as Error).message;
       Logger.error('DownloadPage', this.modError);
     }
     this.modLoading = false;
@@ -580,11 +572,11 @@ export default struct DownloadPage {
         this.SourceChip('Modrinth', 'modrinth');
         this.SourceChip('CurseForge', 'curseforge');
         if (this.remoteSource === 'curseforge') {
-          Text(this.cfKeyConfigured ? 'Key ✓' : 'CurseForge Key')
+          // 镜像源（默认）不需要 key；这里只是可选的「改用官方源」入口
+          Text(this.cfKeyConfigured ? '官方源' : '镜像源 · 免 Key')
             .fontSize(11)
-            .fontColor(this.cfKeyConfigured ? HmclTheme.ON_SECONDARY_CONTAINER : HmclTheme.ERROR)
-            .backgroundColor(this.cfKeyConfigured
-              ? HmclTheme.SECONDARY_CONTAINER : HmclTheme.ERROR_CONTAINER)
+            .fontColor(HmclTheme.ON_SECONDARY_CONTAINER)
+            .backgroundColor(HmclTheme.SECONDARY_CONTAINER)
             .borderRadius(10)
             .padding({ left: 10, right: 10, top: 4, bottom: 4 })
             .margin({ left: 6 })
@@ -616,13 +608,14 @@ export default struct DownloadPage {
   @Builder
   KeyOverlay() {
     Column() {
-      Text('CurseForge API Key')
+      Text(this.cfKeyConfigured ? '改用官方 CurseForge 源' : '改用官方 CurseForge 源（可选）')
         .fontSize(16)
         .fontWeight(FontWeight.Bold)
         .fontColor(HmclTheme.ON_SURFACE)
         .width('100%');
-      Text('CurseForge 强制要求每个应用使用自己的 API Key（不能用别人的）。' +
-        '去 console.curseforge.com 免费申请后填在这里，只保存在本机。')
+      Text('默认走 mcimirror 镜像，不需要任何 Key。' +
+        '只有想直连官方 api.curseforge.com 时才需要填：官方强制每个应用自备 key' +
+        '（去 console.curseforge.com 免费申请）。留空即回到镜像源。')
         .fontSize(11)
         .fontColor(HmclTheme.ON_SURFACE_VARIANT)
         .width('100%')
@@ -910,7 +903,11 @@ export default struct DownloadPage {
       }
 
       if (this.modLoading) {
-        LoadingView({ message: '搜索 Modrinth…' })
+        LoadingView({
+          message: this.remoteSource === 'curseforge'
+            ? '搜索 CurseForge 镜像（响应较大，首次可能要十几秒）…'
+            : '搜索 Modrinth…'
+        })
       } else if (this.modHits.length === 0) {
         EmptyView({ icon: '', message: '没有结果', actionText: '' })
       } else {

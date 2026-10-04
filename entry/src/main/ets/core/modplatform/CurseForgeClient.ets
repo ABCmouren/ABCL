@@ -10,6 +10,7 @@
  * sortField: featured=1, popularity=2, lastUpdated=3, name=4, totalDownloads=6
  */
 import { HttpClient } from '../network/HttpClient';
+import { Mirrors } from '../network/Mirrors';
 import { Logger } from '../util/Utils';
 import {
   ModrinthSearchHit, ModrinthVersion, ModrinthFile, ModrinthSearchPage,
@@ -90,24 +91,55 @@ export interface CfCategoryResponse {
 
 export class CurseForgeClient {
   private static readonly TAG = 'CurseForge';
-  private static readonly BASE = 'https://api.curseforge.com/v1';
   private static readonly GAME_ID = 432;
-  static readonly PAGE_SIZE = 50;
+  /**
+   * CurseForge 每条 mod 都带完整 HTML 描述，响应特别大：
+   * 实测镜像源 pageSize=50 要 1.3MB / 42s，所以降到 25，
+   * 并把读超时拉到 120s（默认 30s 会直接 timeout）。
+   */
+  static readonly PAGE_SIZE = 25;
+  static readonly READ_TIMEOUT_MS = 120000;
 
-  /** CurseForge 要求每页最多 50 */
   private static apiKey: string = '';
+  /**
+   * 走 mcimirror 镜像（默认开）。
+   * 镜像不需要 API Key —— 这正是 HMCL 的 CurseForge「开箱可用」的原因：
+   *   new MirrorRule("https://api.curseforge.com", "https://mod.mcimirror.top/curseforge", true)
+   * 官方 api.curseforge.com 仍然要求每个应用自备 key。
+   */
+  private static useMirror: boolean = true;
 
   static setApiKey(key: string): void {
     CurseForgeClient.apiKey = key;
+  }
+
+  static setUseMirror(on: boolean): void {
+    CurseForgeClient.useMirror = on;
   }
 
   static hasApiKey(): boolean {
     return CurseForgeClient.apiKey.length > 0;
   }
 
+  /** 镜像永远可用；官方源必须有 key */
+  static isAvailable(): boolean {
+    return CurseForgeClient.useMirror || CurseForgeClient.hasApiKey();
+  }
+
+  static isMirror(): boolean {
+    return CurseForgeClient.useMirror || !CurseForgeClient.hasApiKey();
+  }
+
+  private static base(): string {
+    // 没有 key 时强制走镜像，避免 403
+    return Mirrors.curseforgeBase(CurseForgeClient.isMirror());
+  }
+
   private static headers(): Record<string, string> {
     const h: Record<string, string> = {};
-    h['x-api-key'] = CurseForgeClient.apiKey;
+    if (CurseForgeClient.apiKey.length > 0) {
+      h['x-api-key'] = CurseForgeClient.apiKey;
+    }
     h['Accept'] = 'application/json';
     return h;
   }
@@ -179,8 +211,8 @@ export class CurseForgeClient {
     const empty: ModrinthSearchPage = {
       hits: [], offset: pageOffset, limit: pageSize, totalHits: 0, pageCount: 0
     };
-    if (!CurseForgeClient.hasApiKey()) {
-      Logger.warn(CurseForgeClient.TAG, '未配置 CurseForge API Key');
+    if (!CurseForgeClient.isAvailable()) {
+      Logger.warn(CurseForgeClient.TAG, 'CurseForge 不可用（官方源需要 API Key）');
       return empty;
     }
     const parts: string[] = [];
@@ -202,8 +234,8 @@ export class CurseForgeClient {
     parts.push(`index=${pageOffset * pageSize}`);
     parts.push(`pageSize=${pageSize}`);
 
-    const url = `${CurseForgeClient.BASE}/mods/search?${parts.join('&')}`;
-    const res = await HttpClient.getJson<CfModListResponse>(url, CurseForgeClient.headers());
+    const url = `${CurseForgeClient.base()}/mods/search?${parts.join('&')}`;
+    const res = await HttpClient.getJson<CfModListResponse>(url, CurseForgeClient.headers(), CurseForgeClient.READ_TIMEOUT_MS);
     if (!res.success || !res.data) {
       Logger.warn(CurseForgeClient.TAG, `搜索失败: ${res.error}`);
       return empty;
@@ -246,11 +278,11 @@ export class CurseForgeClient {
 
   /** 分类列表（按 classId 过滤） */
   static async getCategories(projectType: string): Promise<CfCategory[]> {
-    if (!CurseForgeClient.hasApiKey()) {
+    if (!CurseForgeClient.isAvailable()) {
       return [];
     }
-    const url = `${CurseForgeClient.BASE}/categories?gameId=${CurseForgeClient.GAME_ID}`;
-    const res = await HttpClient.getJson<CfCategoryResponse>(url, CurseForgeClient.headers());
+    const url = `${CurseForgeClient.base()}/categories?gameId=${CurseForgeClient.GAME_ID}`;
+    const res = await HttpClient.getJson<CfCategoryResponse>(url, CurseForgeClient.headers(), CurseForgeClient.READ_TIMEOUT_MS);
     if (!res.success || !res.data || !res.data.data) {
       Logger.warn(CurseForgeClient.TAG, `分类拉取失败: ${res.error}`);
       return [];
@@ -267,7 +299,7 @@ export class CurseForgeClient {
 
   /** 取项目的文件列表，并映射成 UI 用的 ModrinthVersion 形状 */
   static async getFiles(modId: string, gameVersion: string, loader: string, projectType: string): Promise<ModrinthVersion[]> {
-    if (!CurseForgeClient.hasApiKey()) {
+    if (!CurseForgeClient.isAvailable()) {
       return [];
     }
     const parts: string[] = [];
@@ -280,8 +312,8 @@ export class CurseForgeClient {
     }
     parts.push('index=0');
     parts.push('pageSize=50');
-    const url = `${CurseForgeClient.BASE}/mods/${modId}/files?${parts.join('&')}`;
-    const res = await HttpClient.getJson<CfFileListResponse>(url, CurseForgeClient.headers());
+    const url = `${CurseForgeClient.base()}/mods/${modId}/files?${parts.join('&')}`;
+    const res = await HttpClient.getJson<CfFileListResponse>(url, CurseForgeClient.headers(), CurseForgeClient.READ_TIMEOUT_MS);
     if (!res.success || !res.data || !res.data.data) {
       Logger.warn(CurseForgeClient.TAG, `文件列表失败: ${res.error}`);
       return [];
@@ -304,9 +336,10 @@ export class CurseForgeClient {
         }
       }
     }
+    const rawUrl = f.downloadUrl ? f.downloadUrl : '';
     const file: ModrinthFile = {
       hashes: hash,
-      url: f.downloadUrl ? f.downloadUrl : '',
+      url: Mirrors.rewriteDownloadUrl(rawUrl, CurseForgeClient.isMirror()),
       filename: f.fileName,
       size: f.fileLength,
       primary: true

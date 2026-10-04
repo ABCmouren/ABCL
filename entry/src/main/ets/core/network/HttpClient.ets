@@ -51,9 +51,9 @@ export class HttpClient {
     return headers;
   }
 
-  /** GET → JSON */
-  static async getJson<T>(url: string, headers?: Record<string, string>): Promise<HttpResult<T>> {
-    const res = await HttpClient.getText(url, headers);
+  /** GET → JSON（readTimeoutMs 可覆盖默认 30s，CurseForge 镜像这类大响应需要更长） */
+  static async getJson<T>(url: string, headers?: Record<string, string>, readTimeoutMs?: number): Promise<HttpResult<T>> {
+    const res = await HttpClient.getText(url, headers, readTimeoutMs);
     if (!res.success || res.data === undefined) {
       return { success: false, error: res.error, statusCode: res.statusCode };
     }
@@ -66,14 +66,14 @@ export class HttpClient {
   }
 
   /** GET → 文本 */
-  static async getText(url: string, headers?: Record<string, string>): Promise<HttpResult<string>> {
+  static async getText(url: string, headers?: Record<string, string>, readTimeoutMs?: number): Promise<HttpResult<string>> {
     const request = http.createHttp();
     try {
       const options: http.HttpRequestOptions = {
         method: http.RequestMethod.GET,
         header: HttpClient.buildHeaders(headers),
         connectTimeout: HttpClient.CONNECT_TIMEOUT,
-        readTimeout: HttpClient.READ_TIMEOUT,
+        readTimeout: readTimeoutMs !== undefined && readTimeoutMs > 0 ? readTimeoutMs : HttpClient.READ_TIMEOUT,
         expectDataType: http.HttpDataType.STRING,
         usingCache: false
       };
