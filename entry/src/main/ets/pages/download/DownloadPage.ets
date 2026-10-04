@@ -826,7 +826,13 @@ export default struct DownloadPage {
   ModTab() {
     Column() {
       Row() {
-        TextInput({ placeholder: `在 Modrinth 搜索${this.tabTitle()}…`, text: this.modQuery })
+        TextInput({
+          placeholder: `在 ${this.remoteSource === 'curseforge' ? 'CurseForge' : 'Modrinth'} 搜索${this.tabTitle()}…`,
+          text: this.modQuery
+        })
+          .onSubmit(() => {
+            this.searchMods(this.modQuery, 0);
+          })
           .layoutWeight(1)
           .height(34)
           .fontSize(13)

@@ -19,8 +19,22 @@ export class Constants {
   //   1. App registrations → New registration (Mobile/Desktop platform)
   //   2. Redirect URI: https://login.live.com/oauth20_desktop.srf
   //   3. Grant: "XboxLive.signin" and "offline_access"
-  // The default below works for testing with Device Code flow only.
-  static readonly MICROSOFT_CLIENT_ID = '00000000-0000-0000-0000-000000000000';
+  //
+  // ⚠️ 这里必须是你自己在 Azure 注册的应用的 client_id，留空即可（禁用微软登录）。
+  //
+  // 为什么不能内置一个「现成」的 id（HMCL 也是构建时注入，源码里看不到）：
+  //   - 老的公开启动器 client_id（00000000402b5328 等）在 v2.0 端点已全部失效，
+  //     实测返回 AADSTS700016 Application ... was not found
+  //   - 微软强制每个应用独立注册，无法共用别人的
+  //   - 全零占位符会被直接拒：AADSTS700038 is not a valid application identifier
+  //
+  // 注册步骤：
+  //   1. https://portal.azure.com → App registrations → New registration
+  //   2. Platform: Public client (Mobile and desktop applications)
+  //   3. 不需要 Redirect URI（设备码流程不用）
+  //   4. API permissions: 添加 XboxLive.signin（委托）
+  //   5. 复制 Application (client) ID，填到「设置 → 账户 → 微软 client_id」
+  static readonly MICROSOFT_CLIENT_ID = '';
   // Alias for backward compatibility
   static readonly AZURE_CLIENT_ID = Constants.MICROSOFT_CLIENT_ID;
 

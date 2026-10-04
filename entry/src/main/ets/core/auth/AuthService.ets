@@ -16,6 +16,28 @@ interface DeviceCodeResponse {
   interval: number;
 }
 
+/** 设备码流程第一步的返回值 */
+export interface MicrosoftDeviceCode {
+  ok: boolean;
+  error?: string;
+  deviceCode?: string;
+  userCode?: string;
+  verificationUri?: string;
+  /** 秒 */
+  expiresIn?: number;
+  /** 秒 */
+  interval?: number;
+}
+
+/** 轮询 token 时的响应：成功有 access_token，失败有 error */
+interface MicrosoftTokenResponse {
+  access_token?: string;
+  refresh_token?: string;
+  expires_in?: number;
+  error?: string;
+  error_description?: string;
+}
+
 interface TokenResponse {
   access_token: string;
   refresh_token: string;
@@ -137,40 +159,145 @@ export class AuthService {
     return account;
   }
 
-  // Microsoft OAuth login (device code flow)
-  async loginMicrosoft(): Promise<AuthResult> {
+  /**
+   * 第一步：向微软申请设备码。
+   *
+   * 之前这个流程是错的：拿到 device_code 之后立刻就换 token，
+   * 而设备码流程的本质是「用户去浏览器输码、这边轮询等待」，
+   * 所以永远拿不到 token（微软返回 authorization_pending）。
+   * 而且 user_code / verification_uri 根本没返回给 UI，用户无从输码。
+   *
+   * 现在拆成两步：startMicrosoftLogin() 拿码，pollMicrosoftToken() 轮询。
+   */
+  async startMicrosoftLogin(clientId: string): Promise<MicrosoftDeviceCode> {
+    if (clientId.trim().length === 0) {
+      const msg = '未配置微软 client_id：请到「设置 → 账户」填入你在 portal.azure.com 注册的 Application (client) ID';
+      Logger.error(AuthService.TAG, msg);
+      return { ok: false, error: msg };
+    }
+    const scope = Constants.MICROSOFT_SCOPES;
+    const res = await HttpClient.postForm(
+      'https://login.microsoftonline.com/consumers/oauth2/v2.0/devicecode',
+      'client_id=' + encodeURIComponent(clientId.trim()) + '&scope=' + encodeURIComponent(scope)
+    );
+    if (!res.success || res.data === undefined) {
+      const msg = '获取设备码失败：' + (res.error ? res.error : '网络错误');
+      Logger.error(AuthService.TAG, msg);
+      return { ok: false, error: msg };
+    }
     try {
-      // Step 1: Get device code (form-urlencoded)
-      // Build form body manually (ArkTS strict mode: no Record<string,string> literal)
-      const dcClientId: string = Constants.AZURE_CLIENT_ID;
-      const dcScope: string = Constants.MICROSOFT_SCOPES;
-      const deviceCodeResult = await HttpClient.postForm(
-        'https://login.microsoftonline.com/consumers/oauth2/v2.0/devicecode',
-        'client_id=' + encodeURIComponent(dcClientId) + '&scope=' + encodeURIComponent(dcScope)
-      );
+      const dc = JSON.parse(res.data) as DeviceCodeResponse;
+      Logger.info(AuthService.TAG, '设备码已获取，验证地址 ' + dc.verification_uri);
+      return {
+        ok: true,
+        deviceCode: dc.device_code,
+        userCode: dc.user_code,
+        verificationUri: dc.verification_uri,
+        // 微软给的 expires_in 通常是 900 秒，HMCL 也额外封顶到 900
+        expiresIn: Math.min(dc.expires_in, 900),
+        interval: dc.interval > 0 ? dc.interval : 5
+      };
+    } catch (e) {
+      const msg = '设备码响应解析失败：' + (e as Error).message;
+      Logger.error(AuthService.TAG, msg);
+      return { ok: false, error: msg };
+    }
+  }
 
-      if (!deviceCodeResult.success || !deviceCodeResult.data) {
-        return { success: false, error: 'Failed to get device code' };
+  /**
+   * 第二步：轮询 token，直到授权成功 / 超时 / 被拒绝。
+   *
+   * 语义照搬 HMCL 的 OAuth.authenticateDevice()：
+   *   authorization_pending → 继续等
+   *   slow_down            → interval += 5 秒
+   *   expired_token        → 失败（用户超时）
+   *   其他 error            → 失败，并把微软的 error_description 透出去
+   */
+  async pollMicrosoftToken(clientId: string, dc: MicrosoftDeviceCode): Promise<AuthResult> {
+    const startedAt = Date.now();
+    const pollInterval: number = dc.interval !== undefined ? dc.interval : 5;
+    const ttlSeconds: number = dc.expiresIn !== undefined ? dc.expiresIn : 900;
+    const deviceCode: string = dc.deviceCode !== undefined ? dc.deviceCode : '';
+    let interval: number = pollInterval;
+    while (true) {
+      // 先按 interval 等，再发一次请求（HMCL 也是这个顺序）
+      await AuthService.sleep(interval * 1000);
+
+      if (Date.now() - startedAt >= ttlSeconds * 1000) {
+        const msg = '设备码已过期，请重新登录';
+        Logger.warn(AuthService.TAG, msg);
+        return { success: false, error: msg, errorType: 'expired' };
       }
 
-      const deviceCode = JSON.parse(deviceCodeResult.data) as DeviceCodeResponse;
-
-      // Step 2: Poll for token (form-urlencoded)
-      const tokenClientId: string = Constants.AZURE_CLIENT_ID;
-      const tokenGrantType: string = 'urn:ietf:params:oauth:grant-type:device_code';
-      const tokenDeviceCode: string = deviceCode.device_code;
-      const tokenResult = await HttpClient.postForm(
+      const res = await HttpClient.postForm(
         'https://login.microsoftonline.com/consumers/oauth2/v2.0/token',
-        'client_id=' + encodeURIComponent(tokenClientId) +
-          '&grant_type=' + encodeURIComponent(tokenGrantType) +
-          '&device_code=' + encodeURIComponent(tokenDeviceCode)
+        'client_id=' + encodeURIComponent(clientId.trim()) +
+          '&grant_type=' + encodeURIComponent('urn:ietf:params:oauth:grant-type:device_code') +
+          '&device_code=' + encodeURIComponent(deviceCode)
       );
 
-      if (!tokenResult.success || !tokenResult.data) {
-        return { success: false, error: 'Microsoft login failed or user cancelled' };
+      // postRaw 对非 2xx 返回 success=false，但设备码未授权时微软本来就回 400，
+      // 所以这里必须看 body，而不是看 success。
+      const body = res.data ? res.data : '{}';
+      let err = '';
+      let desc = '';
+      let accessToken = '';
+      let refreshToken = '';
+      let expiresIn = 0;
+      try {
+        const parsed = JSON.parse(body) as MicrosoftTokenResponse;
+        err = parsed.error ? parsed.error : '';
+        desc = parsed.error_description ? parsed.error_description : '';
+        accessToken = parsed.access_token ? parsed.access_token : '';
+        refreshToken = parsed.refresh_token ? parsed.refresh_token : '';
+        expiresIn = parsed.expires_in ? parsed.expires_in : 0;
+      } catch (e) {
+        const msg = '轮询 token 失败：' + (res.error ? res.error : '响应无法解析');
+        Logger.error(AuthService.TAG, msg);
+        return { success: false, error: msg };
       }
 
-      const msToken = JSON.parse(tokenResult.data) as TokenResponse;
+      if (err === 'authorization_pending') {
+        continue;
+      }
+      if (err === 'slow_down') {
+        interval += 5;
+        continue;
+      }
+      if (err === 'expired_token') {
+        const msg = '设备码已过期，请重新登录';
+        Logger.warn(AuthService.TAG, msg);
+        return { success: false, error: msg, errorType: 'expired' };
+      }
+      if (err.length > 0) {
+        const msg = '微软拒绝授权：' + desc;
+        Logger.error(AuthService.TAG, msg);
+        return { success: false, error: msg, errorType: err };
+      }
+      if (accessToken.length === 0) {
+        return { success: false, error: '微软未返回访问令牌' };
+      }
+      return this.finishMicrosoftLogin(accessToken, refreshToken, expiresIn);
+    }
+  }
+
+  private static sleep(ms: number): Promise<void> {
+    return new Promise<void>((resolve: () => void) => {
+      setTimeout(() => {
+        resolve();
+      }, ms);
+    });
+  }
+
+  /** 第 3~6 步：XBL → XSTS → login_with_xbox → profile */
+  private async finishMicrosoftLogin(msAccessToken: string, msRefreshToken: string, msExpiresIn: number): Promise<AuthResult> {
+    try {
+      const msToken: TokenResponse = {
+        access_token: msAccessToken,
+        refresh_token: msRefreshToken,
+        expires_in: msExpiresIn,
+        token_type: 'Bearer'
+      };
 
       // Step 3: Xbox Live authentication
       const xblBody: XblAuthBody = {
