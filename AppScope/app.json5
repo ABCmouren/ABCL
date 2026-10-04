@@ -1,6 +1,6 @@
 {
   "app": {
-    "bundleName": "com.hmcl.launcher",
+    "bundleName": "com.abcmouren.HMCL_HarmonyOS",
     "vendor": "HMCL-Harmony",
     "versionCode": 1000000,
     "versionName": "1.0.0",

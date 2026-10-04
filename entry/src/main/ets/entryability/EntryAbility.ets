@@ -10,9 +10,9 @@ import { JdkManager } from '../core/launch/JdkManager';
 import { JdkExtractor } from '../core/launch/JdkExtractor';
 import { PreferencesManager } from '../core/storage/PreferencesManager';
 import { ModLoaderInstaller } from '../core/game/ModLoaderInstaller';
-import { AssetsManager } from '../core/game/AssetsManager';
 import { NativesManager } from '../core/launch/NativesManager';
 import { Constants } from '../config/Constants';
+import deviceInfo from '@ohos.deviceInfo';
 
 interface BundledJdk {
   rawfile: string;
@@ -35,6 +35,14 @@ export default class EntryAbility extends UIAbility {
 
     Logger.info('EntryAbility', `Files dir: ${filesDir}`);
 
+    // 沙箱根目录 + CPU 架构注入（旧代码把沙箱路径硬编码成已废弃的 bundleName）
+    Constants.appDir = filesDir.endsWith('/') ? filesDir.substring(0, filesDir.length - 1) : filesDir;
+    Constants.osArch = EntryAbility.resolveOsArch();
+    Logger.info('EntryAbility', `appDir=${Constants.appDir}, osArch=${Constants.osArch}`);
+
+    // 日志目录
+    Logger.init(`${filesDir}/${Constants.LOGS_DIR}`);
+
     // Initialize PreferencesManager for persistent storage
     // Must be done before any other initialization that uses settings
     const prefsManager = PreferencesManager.getInstance();
@@ -46,11 +54,6 @@ export default class EntryAbility extends UIAbility {
     const modLoaderInstaller = ModLoaderInstaller.getInstance();
     modLoaderInstaller.init(filesDir);
     Logger.info('EntryAbility', 'ModLoaderInstaller initialized');
-
-    // Initialize the AssetsManager for Minecraft asset downloads
-    const assetsManager = AssetsManager.getInstance();
-    assetsManager.init(filesDir);
-    Logger.info('EntryAbility', 'AssetsManager initialized');
 
     // Initialize the NativesManager for native .so library extraction
     const nativesManager = NativesManager.getInstance();
@@ -91,6 +94,28 @@ export default class EntryAbility extends UIAbility {
       }
       Logger.info('EntryAbility', 'Main page loaded');
     });
+  }
+
+  /** deviceInfo.abiList（如 "arm64-v8a,x86_64"）→ 归一化架构名 */
+  private static resolveOsArch(): string {
+    try {
+      const abi = deviceInfo.abiList;
+      if (abi && abi.length > 0) {
+        const first = abi.split(',')[0].trim().toLowerCase();
+        if (first.indexOf('arm64') >= 0 || first.indexOf('aarch64') >= 0) {
+          return 'aarch64';
+        }
+        if (first.indexOf('x86') >= 0) {
+          return 'x86_64';
+        }
+        if (first.indexOf('arm') >= 0) {
+          return 'arm';
+        }
+      }
+    } catch (e) {
+      Logger.warn('EntryAbility', `abiList 读取失败: ${(e as Error).message}`);
+    }
+    return 'aarch64';
   }
 
   onWindowStageDestroy(): void {

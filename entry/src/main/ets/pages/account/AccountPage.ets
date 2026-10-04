@@ -30,7 +30,7 @@ export default struct AccountPage {
         Blank();
         Button('+ Add')
           .fontSize(13)
-          .fontColor('#0078D4')
+          .fontColor('#5C6BC0')
           .backgroundColor(Color.Transparent)
           .onClick(() => {
             this.showAddModal = true;
@@ -50,7 +50,7 @@ export default struct AccountPage {
             .fontColor('#BFBFBF')
             .margin({ top: 8 });
           Button('Add Account')
-            .backgroundColor('#0078D4')
+            .backgroundColor('#5C6BC0')
             .fontColor(Color.White)
             .borderRadius(8)
             .margin({ top: 24 })
@@ -88,7 +88,7 @@ export default struct AccountPage {
     }
     .width('100%')
     .height('100%')
-    .backgroundColor('#F5F5F5');
+    .backgroundColor('#FBF8FF');
   }
 
   @Builder
@@ -120,7 +120,7 @@ export default struct AccountPage {
 
       Button('Select')
         .fontSize(12)
-        .fontColor(account.selected ? '#666666' : '#0078D4')
+        .fontColor(account.selected ? '#666666' : '#5C6BC0')
         .backgroundColor(Color.Transparent)
         .onClick(() => {
           if (!account.selected) {
@@ -163,7 +163,7 @@ export default struct AccountPage {
       Button('Microsoft Account')
         .width('100%')
         .height(44)
-        .backgroundColor('#0078D4')
+        .backgroundColor('#5C6BC0')
         .fontColor(Color.White)
         .borderRadius(8)
         .margin({ bottom: 8 })
@@ -217,7 +217,7 @@ export default struct AccountPage {
         .width('100%')
         .height(40)
         .fontSize(14)
-        .backgroundColor('#F5F5F5')
+        .backgroundColor('#FBF8FF')
         .borderRadius(8)
         .padding({ left: 12 })
         .onChange((value: string) => {
@@ -227,7 +227,7 @@ export default struct AccountPage {
       Button('Login')
         .width('100%')
         .height(40)
-        .backgroundColor('#0078D4')
+        .backgroundColor('#5C6BC0')
         .fontColor(Color.White)
         .borderRadius(8)
         .margin({ top: 16 })

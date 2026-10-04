@@ -15,7 +15,20 @@
 
 ## 📋 概述
 
-HMCL-HarmonyOS 是 [HMCL](https://github.com/HMCL-dev/HMCL)（Hello Minecraft! Launcher）的鸿蒙原生移植版，基于 [AMCL](https://github.com/LZZLHY/amcl/releases)（纯血鸿蒙原生 Minecraft 启动器）的启动架构。它使用 **ArkTS + ArkUI** 构建 UI，通过 **NAPI C++ 桥接层** 直接加载 `libjvm.so` 创建 JVM 来运行 Minecraft Java Edition。
+HMCL-HarmonyOS 是 [HMCL](https://github.com/HMCL-dev/HMCL)（Hello Minecraft! Launcher）的鸿蒙原生移植版，参考了 [AMCL](https://github.com/LZZLHY/amcl)（Axe Minecraft Launcher）的实现。**AMCL 的源码是公开的**（`MyApplication/JavaApp/src/com/amcl/launcher/` 是 Java 启动层，`MyApplication/entry/src/main/cpp/` 是 native 层），因此本项目可以直接对齐它的启动契约与资源版本。HMCL-HarmonyOS 使用 **ArkTS + ArkUI** 构建 UI，通过 **NAPI C++ 桥接层** 加载 `libjvm.so` 创建 JVM 来运行 Minecraft Java Edition。
+
+### 与 AMCL 上游的同步状态
+
+截至 **2026-09-24**，AMCL 最新 Release 为 **v1.0.5**（unsigned HAP）。本项目与上游的对齐情况：
+
+| 项 | 状态 |
+|---|---|
+| `amcl-launcher.jar` | 由上游 `MyApplication/JavaApp/src/com/amcl/launcher/` 全部 18 个类重新编译（`javac --release 8`），`LaunchConfig` 的 9 个字段与上游一致 |
+| JDK 运行时 | 对齐 `mc-ohos-resources` 最新 release：JDK 8 `v8u452-ohos-4`、JDK 17 `v17.0.13-ohos-5`、JDK 21 `v21.0.5-ohos-7`、JDK 25 `v25.0.4-ohos-2`（sha256 与上游 release 元数据一致） |
+| Forge/NeoForge processors | 对齐 AMCL `ForgelikeNative.runJavaProcessor` 契约，native 侧新增 `runJavaProcessor` |
+| Maven / meta 端点 | 修正 NeoForge 的 `/releases` 前缀、Fabric/Quilt 改走官方 meta API、BMCLAPI 镜像路径改为 `/maven/` |
+
+> 详细的排查与修复记录见 **[FIXES-2026-10.md](./FIXES-2026-10.md)**。
 
 ### 为什么需要这个项目？
 
@@ -46,12 +59,12 @@ HarmonyOS NEXT 是纯血鸿蒙系统，**不内置 JVM**。要在鸿蒙设备上
 ### 引擎层
 | 模块 | 说明 |
 |------|------|
-| 🧩 **Native Bridge** | `libhmcl_native.so` 通过 NAPI 暴露 `jvmInit`、`mcLaunch` 等接口 |
-| 🏗️ **JVM 启动** | 三阶段降级：Native Bridge → Process Launch → Stub |
-| 🖼️ **XComponent 渲染** | LWJGL GLFW shim 绑定到 XComponent 表面 |
-| ⌨️ **输入桥接** | ArkTS 触摸/鼠标/键盘事件 → NAPI → JNI → LWJGL |
-| 🚀 **JIT 支持** | 自动检测 JIT 可用性，不可用时降级到解释器模式 |
-| 📦 **JDK 管理** | 内置 JDK 8/17/21，从 rawfile 提取或网络下载 fallback |
+| 🧩 **Native Bridge** | `libhmcl_native.so` 的 NAPI 接口代码骨架，待真机验证 |
+| 🏗️ **JVM 启动** | JVM 初始化与启动路径代码骨架；失败时返回 stub，待真机验证 |
+| 🖼️ **XComponent 渲染** | LWJGL GLFW shim 到 XComponent 的绑定代码，待真机验证 |
+| ⌨️ **输入桥接** | ArkTS 触摸/鼠标/键盘到 NAPI/JNI 的桥接代码，待真机验证 |
+| 🚀 **JIT 支持** | JIT 可用性检测与降级逻辑代码，待真机验证 |
+| 📦 **JDK 管理** | JDK 资源提取和下载逻辑代码，当前仅列出 JDK 8/17/21，待真机验证 |
 
 ---
 
@@ -200,12 +213,12 @@ HMCL-HarmonyOS/
 │           │       └── DownloadTask.ets      # 下载任务模型
 │           └── resources/
 │               └── rawfile/                  # HAP 内置资源
-│                   ├── amcl-launcher.jar     # AMCL 启动入口（~11KB）
+│                   ├── amcl-launcher.jar     # AMCL 启动入口（18 个类，~105KB）
 │                   ├── cacert.pem            # CA 证书
 │                   ├── stub-objc-bridge.jar  # ObjC 桥接桩（~54KB）
-│                   ├── jdk8-ohos-full.zip    # JDK 8 (~38MB)
-│                   ├── jdk17-ohos-full-v4.zip # JDK 17 (~109MB)
-│                   ├── jdk21-ohos-full.zip   # JDK 21 (~112MB)
+│                   ├── jdk8-ohos-full-v4.zip # JDK 8 (~38MB)
+│                   ├── jdk17-ohos-full-v5.zip # JDK 17 (~109MB)
+│                   ├── jdk21-ohos-full-v7.zip # JDK 21 (~109MB)
 │                   └── lwjgl/                # LWJGL JARs（~12MB）
 │                       ├── lwjgl.jar
 │                       ├── lwjgl-glfw.jar
@@ -260,10 +273,10 @@ bash hvigorw --no-daemon --sync assembleHap
 
 | JDK 版本 | 对应 MC 版本 | 源文件 | 大小 |
 |----------|-------------|--------|------|
-| JDK 8 | MC 1.0 ~ 1.16.5 | `jdk8-ohos-full.zip` | ~38MB |
-| JDK 17 | MC 1.17 ~ 1.20.4 | `jdk17-ohos-full-v4.zip` | ~109MB |
-| JDK 21 | MC 1.20.5 ~ 1.21.x | `jdk21-ohos-full.zip` | ~112MB |
-| JDK 25 | MC 26.1+ | 网络下载（暂未内置） | — |
+| JDK 8 | MC 1.0 ~ 1.16.5 | `jdk8-ohos-full-v4.zip`（`v8u452-ohos-4`） | ~38MB |
+| JDK 17 | MC 1.17 ~ 1.20.4 | `jdk17-ohos-full-v5.zip`（`v17.0.13-ohos-5`） | ~109MB |
+| JDK 21 | MC 1.20.5 ~ 1.21.x | `jdk21-ohos-full-v7.zip`（`v21.0.5-ohos-7`） | ~109MB |
+| JDK 25 | MC 26.1+ | `jdk25-ohos-full-v2.zip`（`v25.0.4-ohos-2`，按需下载） | ~114MB |
 
 JDK 源码：https://github.com/LZZLHY/mc-ohos-resources
 

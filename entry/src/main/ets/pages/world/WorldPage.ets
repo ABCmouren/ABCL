@@ -202,7 +202,7 @@ export default struct WorldPage {
             LoadingProgress()
               .width(32)
               .height(32)
-              .color('#0078D4');
+              .color('#5C6BC0');
           }
           .width('100%')
           .height('100%')
@@ -232,7 +232,7 @@ export default struct WorldPage {
       }
       .width('100%')
       .height('100%')
-      .backgroundColor('#F5F5F5');
+      .backgroundColor('#FBF8FF');
 
       // Delete confirmation dialog
       if (this.showDeleteConfirm) {
@@ -311,7 +311,7 @@ export default struct WorldPage {
         Row() {
           Text(world.gameMode)
             .fontSize(11)
-            .fontColor('#0078D4')
+            .fontColor('#5C6BC0')
             .backgroundColor('#E8F4FD')
             .borderRadius(4)
             .padding({ left: 6, right: 6, top: 2, bottom: 2 });
@@ -355,7 +355,7 @@ export default struct WorldPage {
             Button({ type: ButtonType.Normal }) {
               Text('← Back')
                 .fontSize(14)
-                .fontColor('#0078D4');
+                .fontColor('#5C6BC0');
             }
             .backgroundColor(Color.Transparent);
             Blank();
@@ -410,7 +410,7 @@ export default struct WorldPage {
               .onClick(() => this.confirmDelete(this.selectedIndex));
             Button('Backup')
               .height(40)
-              .backgroundColor('#0078D4')
+              .backgroundColor('#5C6BC0')
               .fontColor(Color.White)
               .fontSize(14)
               .borderRadius(8)

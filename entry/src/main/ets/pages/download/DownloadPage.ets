@@ -127,7 +127,7 @@ export default struct DownloadPage {
     }
     .width('100%')
     .height('100%')
-    .backgroundColor('#F5F5F5');
+    .backgroundColor('#FBF8FF');
   }
 
   @Builder
@@ -135,7 +135,7 @@ export default struct DownloadPage {
     Text(label)
       .fontSize(13)
       .fontColor(this.filterType === type ? Color.White : '#666666')
-      .backgroundColor(this.filterType === type ? '#0078D4' : '#E8E8E8')
+      .backgroundColor(this.filterType === type ? '#5C6BC0' : '#E8E8E8')
       .borderRadius(16)
       .padding({ left: 14, right: 14, top: 6, bottom: 6 })
       .onClick(() => {
@@ -168,12 +168,12 @@ export default struct DownloadPage {
         LoadingProgress()
           .width(20)
           .height(20)
-          .color('#0078D4');
+          .color('#5C6BC0');
       } else {
         Button('Install')
           .fontSize(12)
           .fontColor(Color.White)
-          .backgroundColor('#0078D4')
+          .backgroundColor('#5C6BC0')
           .borderRadius(6)
           .height(30)
           .onClick(() => {

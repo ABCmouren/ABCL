@@ -204,7 +204,7 @@ export default struct ModPage {
             LoadingProgress()
               .width(32)
               .height(32)
-              .color('#0078D4');
+              .color('#5C6BC0');
           }
           .width('100%')
           .height('100%')
@@ -230,7 +230,7 @@ export default struct ModPage {
       }
       .width('100%')
       .height('100%')
-      .backgroundColor('#F5F5F5');
+      .backgroundColor('#FBF8FF');
 
       // Delete confirmation dialog
       if (this.showDeleteConfirm) {

@@ -95,9 +95,9 @@ export default struct SettingsPage {
                 style: SliderStyle.OutSet
               })
               .width('100%')
-              .blockColor('#0078D4')
+              .blockColor('#5C6BC0')
               .trackColor('#E0E0E0')
-              .selectedColor('#0078D4')
+              .selectedColor('#5C6BC0')
               .onChange((value: number) => {
                 this.downloadThreads = value;
                 this.saveConfig();
@@ -112,7 +112,7 @@ export default struct SettingsPage {
                   .fontColor('#1A1A1A');
                 Blank();
                 Toggle({ type: ToggleType.Switch, isOn: this.closeOnLaunch })
-                  .selectedColor('#0078D4')
+                  .selectedColor('#5C6BC0')
                   .onChange((value: boolean) => {
                     this.closeOnLaunch = value;
                     this.saveConfig();
@@ -129,7 +129,7 @@ export default struct SettingsPage {
                   .fontColor('#1A1A1A');
                 Blank();
                 Toggle({ type: ToggleType.Switch, isOn: this.showGameLog })
-                  .selectedColor('#0078D4')
+                  .selectedColor('#5C6BC0')
                   .onChange((value: boolean) => {
                     this.showGameLog = value;
                     this.saveConfig();
@@ -149,7 +149,7 @@ export default struct SettingsPage {
                 .width('100%')
                 .height(36)
                 .fontSize(14)
-                .backgroundColor('#F5F5F5')
+                .backgroundColor('#FBF8FF')
                 .borderRadius(6)
                 .padding({ left: 12 })
                 .onChange((value: string) => {
@@ -168,9 +168,9 @@ export default struct SettingsPage {
                 style: SliderStyle.OutSet
               })
               .width('100%')
-              .blockColor('#0078D4')
+              .blockColor('#5C6BC0')
               .trackColor('#E0E0E0')
-              .selectedColor('#0078D4')
+              .selectedColor('#5C6BC0')
               .onChange((value: number) => {
                 this.minMemory = value;
                 this.saveConfig();
@@ -187,9 +187,9 @@ export default struct SettingsPage {
                 style: SliderStyle.OutSet
               })
               .width('100%')
-              .blockColor('#0078D4')
+              .blockColor('#5C6BC0')
               .trackColor('#E0E0E0')
-              .selectedColor('#0078D4')
+              .selectedColor('#5C6BC0')
               .onChange((value: number) => {
                 this.maxMemory = value;
                 this.saveConfig();
@@ -202,7 +202,7 @@ export default struct SettingsPage {
                 .width('100%')
                 .height(60)
                 .fontSize(13)
-                .backgroundColor('#F5F5F5')
+                .backgroundColor('#FBF8FF')
                 .borderRadius(6)
                 .padding({ left: 12 })
                 .onChange((value: string) => {
@@ -235,7 +235,7 @@ export default struct SettingsPage {
     }
     .width('100%')
     .height('100%')
-    .backgroundColor('#F5F5F5');
+    .backgroundColor('#FBF8FF');
   }
 
   @Builder
@@ -275,7 +275,7 @@ export default struct SettingsPage {
     Text(label)
       .fontSize(13)
       .fontColor(this.currentTheme === type ? Color.White : '#666666')
-      .backgroundColor(this.currentTheme === type ? '#0078D4' : '#E8E8E8')
+      .backgroundColor(this.currentTheme === type ? '#5C6BC0' : '#E8E8E8')
       .borderRadius(6)
       .padding({ left: 16, right: 16, top: 6, bottom: 6 })
       .onClick(() => {
@@ -289,7 +289,7 @@ export default struct SettingsPage {
     Text(label)
       .fontSize(13)
       .fontColor(this.downloadSource === type ? Color.White : '#666666')
-      .backgroundColor(this.downloadSource === type ? '#0078D4' : '#E8E8E8')
+      .backgroundColor(this.downloadSource === type ? '#5C6BC0' : '#E8E8E8')
       .borderRadius(6)
       .padding({ left: 16, right: 16, top: 6, bottom: 6 })
       .onClick(() => {

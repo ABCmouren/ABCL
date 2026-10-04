@@ -14,10 +14,13 @@ export function mcIsRunning(): boolean;
 export function mcForceExit(): void;
 export function mcReadLog(): string;
 export function setFilesDir(dir: string): void;
+export function registerXComponent(xComponentId: string): boolean;
 export function inputSendCursorPos(x: number, y: number): void;
 export function inputSendMouseButton(button: number, action: number, mods: number): void;
 export function inputSendKey(key: number, scancode: number, action: number, mods: number): void;
 export function inputSendScroll(x: number, y: number): void;
+/** 在独立子进程里运行一个 Java 主类（Forge/NeoForge 安装期的 processors）。返回子进程退出码。 */
+export function runJavaProcessor(javaHome: string, classpath: string, mainClass: string, args: string[], workDir: string, logFile: string, xmxMb: number): Promise<number>;
 
 export interface GpuInfo {
   name: string;
@@ -38,10 +41,13 @@ declare module 'libhmcl_native.so' {
   export function mcForceExit(): void;
   export function mcReadLog(): string;
   export function setFilesDir(dir: string): void;
+export function registerXComponent(xComponentId: string): boolean;
   export function inputSendCursorPos(x: number, y: number): void;
   export function inputSendMouseButton(button: number, action: number, mods: number): void;
   export function inputSendKey(key: number, scancode: number, action: number, mods: number): void;
   export function inputSendScroll(x: number, y: number): void;
+/** 在独立子进程里运行一个 Java 主类（Forge/NeoForge 安装期的 processors）。返回子进程退出码。 */
+export function runJavaProcessor(javaHome: string, classpath: string, mainClass: string, args: string[], workDir: string, logFile: string, xmxMb: number): Promise<number>;
 
   export interface GpuInfo {
     name: string;

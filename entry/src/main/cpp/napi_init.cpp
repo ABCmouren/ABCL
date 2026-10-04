@@ -29,6 +29,7 @@
 #include <napi/native_api.h>
 
 #include "jvm_launcher.h"
+#include "java_tool.h"
 #include "elf_loader.h"
 #include "input_bridge.h"
 #include "log.h"
@@ -452,6 +453,89 @@ static napi_value InputSendScroll(napi_env env, napi_callback_info info) {
 // ============================================================
 // Module Registration
 // ============================================================
+// ============================================================
+// NAPI: runJavaProcessor
+// 在 fork 出的独立子进程里运行一个 Java 主类（干净 classpath）。
+// 供 Forge / NeoForge 安装期执行 install_profile 的 processors。
+// 签名：runJavaProcessor(javaHome, classpath, mainClass, args[], workDir, logFile, xmxMb): Promise<number>
+// ============================================================
+namespace {
+
+struct ProcessorJob {
+    std::string javaHome;
+    std::string classpath;
+    std::string mainClass;
+    std::vector<std::string> args;
+    std::string workDir;
+    std::string logFile;
+    int xmxMb = 2048;
+    int result = -1;
+    napi_async_work work = nullptr;
+    napi_deferred deferred = nullptr;
+};
+
+void ProcessorExecute(napi_env env, void *data) {
+    ProcessorJob *job = (ProcessorJob *) data;
+    job->result = runJavaTool(job->javaHome, job->classpath, job->mainClass,
+                              job->args, job->workDir, job->logFile, job->xmxMb);
+}
+
+void ProcessorComplete(napi_env env, napi_status status, void *data) {
+    ProcessorJob *job = (ProcessorJob *) data;
+    napi_value result;
+    napi_create_int32(env, job->result, &result);
+    if (job->deferred) {
+        napi_resolve_deferred(env, job->deferred, result);
+    }
+    napi_delete_async_work(env, job->work);
+    delete job;
+}
+
+} // namespace
+
+static napi_value RunJavaProcessor(napi_env env, napi_callback_info info) {
+    size_t argc = 7;
+    napi_value args[7];
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+
+    ProcessorJob *job = new ProcessorJob();
+    if (argc >= 7) {
+        job->javaHome = napiGetString(env, args[0]);
+        job->classpath = napiGetString(env, args[1]);
+        job->mainClass = napiGetString(env, args[2]);
+        bool isArray = false;
+        napi_is_array(env, args[3], &isArray);
+        if (isArray) {
+            uint32_t n = 0;
+            napi_get_array_length(env, args[3], &n);
+            for (uint32_t i = 0; i < n; i++) {
+                napi_value el;
+                if (napi_get_element(env, args[3], i, &el) == napi_ok) {
+                    job->args.push_back(napiGetString(env, el));
+                }
+            }
+        }
+        job->workDir = napiGetString(env, args[4]);
+        job->logFile = napiGetString(env, args[5]);
+        int32_t xmx = 2048;
+        napi_get_value_int32(env, args[6], &xmx);
+        job->xmxMb = xmx;
+    }
+    if (job->xmxMb < 512) job->xmxMb = 512;
+    if (job->xmxMb > 8192) job->xmxMb = 8192;
+
+    logInfo("NAPI", "runJavaProcessor: main=" + job->mainClass + " jdk=" + job->javaHome
+        + " args=" + std::to_string(job->args.size()));
+
+    napi_value promise;
+    napi_create_promise(env, &job->deferred, &promise);
+    napi_value resourceName;
+    napi_create_string_utf8(env, "runJavaProcessor", NAPI_AUTO_LENGTH, &resourceName);
+    napi_create_async_work(env, nullptr, resourceName, ProcessorExecute, ProcessorComplete, job, &job->work);
+    napi_queue_async_work(env, job->work);
+    return promise;
+}
+
 static napi_value Init(napi_env env, napi_value exports) {
     logInfo("NAPI", "HMCL Native Bridge initializing...");
     
@@ -514,6 +598,11 @@ static napi_value Init(napi_env env, napi_value exports) {
     napi_value fn_inputScroll;
     napi_create_function(env, "inputSendScroll", NAPI_AUTO_LENGTH, InputSendScroll, nullptr, &fn_inputScroll);
     napi_set_named_property(env, exports, "inputSendScroll", fn_inputScroll);
+    
+    // Forge / NeoForge processors
+    napi_value fn_runJavaProcessor;
+    napi_create_function(env, "runJavaProcessor", NAPI_AUTO_LENGTH, RunJavaProcessor, nullptr, &fn_runJavaProcessor);
+    napi_set_named_property(env, exports, "runJavaProcessor", fn_runJavaProcessor);
     
     logInfo("NAPI", "HMCL Native Bridge initialized successfully");
     return exports;

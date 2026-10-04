@@ -108,9 +108,12 @@ export class JdkManager {
     const parentDir: string = targetPath.substring(0, targetPath.lastIndexOf('/'));
     FileUtils.mkdirs(parentDir);
 
-    // Use HttpClient to download
-    await HttpClient.downloadFile(url, targetPath);
-    Logger.info(JdkManager.TAG, `JDK downloaded to: ${targetPath}`);
+    // 流式下载（旧 API 会把整个 zip 读进内存，100MB+ 必 OOM）
+    const outcome = await HttpClient.downloadToFile(url, targetPath, 0);
+    if (!outcome.success) {
+      throw new Error(`JDK 下载失败: ${outcome.error}`);
+    }
+    Logger.info(JdkManager.TAG, `JDK downloaded to: ${targetPath} (${outcome.bytes} bytes)`);
   }
 
   /**

@@ -50,11 +50,17 @@ export class Constants {
   static readonly FORGE_MAVEN = 'https://maven.minecraftforge.net';
   static readonly BMCLAPI_FORGE_MAVEN = 'https://bmclapi2.bangbang93.com/forge';
   static readonly FABRIC_MAVEN = 'https://maven.fabricmc.net';
-  static readonly BMCLAPI_FABRIC_MAVEN = 'https://bmclapi2.bangbang93.com/fabric';
-  static readonly QUILT_MAVEN = 'https://maven.quiltmc.org';
-  static readonly NEO_FORGE_MAVEN = 'https://maven.neoforged.net';
+  // BMCLAPI 没有 fabric 镜像（实测 404），Fabric 必须走官方 maven
+  static readonly BMCLAPI_FABRIC_MAVEN = 'https://maven.fabricmc.net';
+  static readonly QUILT_MAVEN = 'https://maven.quiltmc.org/repository/release';
+  // NeoForge 的 maven 根带 /releases 前缀（旧代码漏了，导致 NeoForge 全部 404）
+  static readonly NEO_FORGE_MAVEN = 'https://maven.neoforged.net/releases';
 
   // Mod platform APIs
+  // Fabric / Quilt 官方 meta API（BMCLAPI 没有镜像，必须走官方）
+  static readonly FABRIC_META = 'https://meta.fabricmc.net';
+  static readonly QUILT_META = 'https://meta.quiltmc.org';
+
   static readonly MODRINTH_API = 'https://api.modrinth.com/v2';
   static readonly CURSEFORGE_API = 'https://api.curseforge.com/v1';
 
@@ -65,9 +71,31 @@ export class Constants {
   static readonly PREF_KEY_LAUNCH_SETTINGS = 'hmcl_launch_settings';
   static readonly PREF_KEY_DOWNLOAD_SOURCE = 'hmcl_download_source';
 
-  // App directory
-  static readonly APP_DIR = '/data/app/el2/100/base/com.hmcl.launcher/';
+  // 应用沙箱根目录：由 EntryAbility 在启动时用 context.filesDir 注入。
+  // 旧代码把它硬编码成 '/data/app/el2/100/base/com.hmcl.launcher/'，
+  // 而 AppScope 的 bundleName 早已改成 com.abcmouren.HMCL_HarmonyOS，
+  // 该路径在设备上不存在 → 所有默认游戏目录都写不进去。
+  static appDir: string = '';
   static readonly MINECRAFT_DIR = 'minecraft';
+
+  /** 拼接沙箱根与子路径（避免 files + minecraft = filesminecraft 的经典错误） */
+  static joinRoot(root: string, leaf: string): string {
+    if (root.length === 0) {
+      return leaf;
+    }
+    return root.endsWith('/') ? root + leaf : root + '/' + leaf;
+  }
+
+  /** 默认的 .minecraft 目录：<sandbox>/minecraft */
+  static baseDir(): string {
+    return Constants.joinRoot(Constants.appDir, Constants.MINECRAFT_DIR);
+  }
+  /** 运行设备的 CPU 架构（'aarch64' / 'x86_64'），由 EntryAbility 从 deviceInfo.abiList 注入 */
+  static osArch: string = 'aarch64';
+
+  // 下载并发（AMCL 的 native 引擎默认 6~8；assets 多而小，可以更高）
+  static readonly DOWNLOAD_CONCURRENCY = 8;
+  static readonly ASSET_CONCURRENCY = 12;
 
   // Game directories
   static readonly GAME_DIR = 'minecraft';
@@ -102,26 +130,27 @@ export class Constants {
   static readonly JDK_RELEASES_BASE = 'https://github.com/LZZLHY/mc-ohos-resources/releases/download';
 
   // JDK 17 - Stable (MC 1.18-1.20.4)
-  static readonly JDK_17_TAG = 'v17.0.13-ohos-4';
-  static readonly JDK_17_ASSET = 'jdk17-ohos-full-v4.zip';
-  static readonly JDK_17_SHA256 = '822bf2c75042d46c0190bf184f364768874fb39610062c469bd43d40ea78966f';
+  static readonly JDK_17_TAG = 'v17.0.13-ohos-5';
+  static readonly JDK_17_ASSET = 'jdk17-ohos-full-v5.zip';
+  static readonly JDK_17_SHA256 = '0e26b0dece38156838456cfb12058d863aa9856cdd8fd648f06f9bc5e91f8ecd';
   static readonly JDK_17_URL = `${Constants.JDK_RELEASES_BASE}/${Constants.JDK_17_TAG}/${Constants.JDK_17_ASSET}`;
 
   // JDK 21 - Experimental (MC 1.20.5-1.21.x)
-  static readonly JDK_21_TAG = 'v21.0.5-ohos-6';
-  static readonly JDK_21_ASSET = 'jdk21-ohos-full.zip';
-  static readonly JDK_21_SHA256 = '99ed88eec9afe38f78491e871d9f4023cd03e3525b6550a6a65273baddfb2932';
+  static readonly JDK_21_TAG = 'v21.0.5-ohos-7';
+  static readonly JDK_21_ASSET = 'jdk21-ohos-full-v7.zip';
+  static readonly JDK_21_SHA256 = '21556d0d4fc5eea09ba27068cf8a96803bb1667b35adbc8495fdc5f831316275';
   static readonly JDK_21_URL = `${Constants.JDK_RELEASES_BASE}/${Constants.JDK_21_TAG}/${Constants.JDK_21_ASSET}`;
 
   // JDK 25 - Latest (MC 26.1+)
-  static readonly JDK_25_TAG = 'v25.0.4-ohos-1';
-  static readonly JDK_25_ASSET = 'jdk25-ohos-full.zip';
+  static readonly JDK_25_TAG = 'v25.0.4-ohos-2';
+  static readonly JDK_25_ASSET = 'jdk25-ohos-full-v2.zip';
+  static readonly JDK_25_SHA256 = 'd8e31df5d199a9b34d6d13c188b71af19c2fb1738da7bf3c6eeaed89a0a37538';
   static readonly JDK_25_URL = `${Constants.JDK_RELEASES_BASE}/${Constants.JDK_25_TAG}/${Constants.JDK_25_ASSET}`;
 
   // JDK 8 - Legacy (MC 1.0-1.16.5)
-  static readonly JDK_8_TAG = 'v8u452-ohos-3';
-  static readonly JDK_8_ASSET = 'jdk8-ohos-full.zip';
-  static readonly JDK_8_SHA256 = '478fa9a5a0dfe80bbfcd8d980b2978d4f878d69a38b17f57703daf9a3bff8f6f';
+  static readonly JDK_8_TAG = 'v8u452-ohos-4';
+  static readonly JDK_8_ASSET = 'jdk8-ohos-full-v4.zip';
+  static readonly JDK_8_SHA256 = '02c2cedb3539682de3df3d7870b855bfefaac1f4cfe53951cfe90b0dea3d3a63';
   static readonly JDK_8_URL = `${Constants.JDK_RELEASES_BASE}/${Constants.JDK_8_TAG}/${Constants.JDK_8_ASSET}`;
 
   // Local JDK storage paths (relative to app sandbox)
@@ -132,9 +161,9 @@ export class Constants {
   static readonly JDK_8_DIR = 'jdk8';
 
   // Rawfile asset names for bundled JDKs (must match filenames in resources/rawfile/)
-  static readonly JDK_8_RAWFILE = 'jdk8-ohos-full.zip';
-  static readonly JDK_17_RAWFILE = 'jdk17-ohos-full-v4.zip';
-  static readonly JDK_21_RAWFILE = 'jdk21-ohos-full.zip';
+  static readonly JDK_8_RAWFILE = 'jdk8-ohos-full-v4.zip';
+  static readonly JDK_17_RAWFILE = 'jdk17-ohos-full-v5.zip';
+  static readonly JDK_21_RAWFILE = 'jdk21-ohos-full-v7.zip';
 
   // Amcl launcher JAR (bundled in rawfile or downloaded)
   static readonly AMCL_LAUNCHER_JAR = 'amcl-launcher.jar';

@@ -38,6 +38,7 @@ find_library(ace-napi-lib ace_napi.z)
 add_library(hmcl_native SHARED
     napi_init.cpp
     jvm_launcher.cpp
+    java_tool.cpp
     elf_loader.cpp
     input_bridge.cpp
     log.cpp

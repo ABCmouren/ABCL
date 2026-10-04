@@ -233,13 +233,25 @@ export class LaunchEngine {
         return result;
       }
 
+      // The JDK may have been selected after init() (EntryAbility initializes it
+      // asynchronously). Retry native initialization here once the runtime is ready.
+      if (!this.nativeReady && this.javaHome.length > 0) {
+        try {
+          this.nativeReady = native.jvmInit(this.javaHome);
+          Logger.info(LaunchEngine.TAG, 'Deferred native jvmInit result: ' + this.nativeReady);
+        } catch (e) {
+          Logger.warn(LaunchEngine.TAG, 'Deferred native jvmInit failed');
+          this.nativeReady = false;
+        }
+      }
+
       if (this.nativeReady) {
         return await this.nativeLaunch(installation, account);
       }
 
-      // Fallback: try @ohos.process child_process launch
-      Logger.info(LaunchEngine.TAG, 'Native bridge not available, trying process launch...');
-      return await this.processLaunch(installation, account);
+      // ProcessLauncher is intentionally a stub on HarmonyOS. Do not report a
+      // fake successful process; return the explicit native bridge failure.
+      return await this.stubLaunch(installation, account);
     } catch (e) {
       this.gameRunning = false;
       const errMsg: string = (e as Error).message || 'Unknown error';

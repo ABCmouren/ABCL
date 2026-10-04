@@ -190,7 +190,7 @@ export default struct ModpackPage {
 
   private getStatusColor(status: InstallStatus): ResourceColor {
     switch (status) {
-      case InstallStatus.NOT_INSTALLED: return '#0078D4';
+      case InstallStatus.NOT_INSTALLED: return '#5C6BC0';
       case InstallStatus.INSTALLING: return '#FF8C00';
       case InstallStatus.INSTALLED: return '#107C10';
       case InstallStatus.UPDATE_AVAILABLE: return '#D83B01';
@@ -211,7 +211,7 @@ export default struct ModpackPage {
         Button({ type: ButtonType.Normal }) {
           Text('+ Import')
             .fontSize(13)
-            .fontColor('#0078D4')
+            .fontColor('#5C6BC0')
             .fontWeight(FontWeight.Medium);
         }
         .height(32)
@@ -232,7 +232,7 @@ export default struct ModpackPage {
           LoadingProgress()
             .width(32)
             .height(32)
-            .color('#0078D4');
+            .color('#5C6BC0');
         }
         .width('100%')
         .height('100%')
@@ -262,7 +262,7 @@ export default struct ModpackPage {
     }
     .width('100%')
     .height('100%')
-    .backgroundColor('#F5F5F5');
+    .backgroundColor('#FBF8FF');
   }
 
   @Builder ModpackItemComponent(modpack: ModpackInfo, index: number) {
@@ -345,7 +345,7 @@ export default struct ModpackPage {
             Button({ type: ButtonType.Normal }) {
               Text('← Back')
                 .fontSize(14)
-                .fontColor('#0078D4');
+                .fontColor('#5C6BC0');
             }
             .backgroundColor(Color.Transparent);
             Blank();
@@ -427,7 +427,7 @@ export default struct ModpackPage {
             if (modpack.installStatus === InstallStatus.NOT_INSTALLED) {
               Button('Install')
                 .height(44)
-                .backgroundColor('#0078D4')
+                .backgroundColor('#5C6BC0')
                 .fontColor(Color.White)
                 .fontSize(15)
                 .fontWeight(FontWeight.Medium)

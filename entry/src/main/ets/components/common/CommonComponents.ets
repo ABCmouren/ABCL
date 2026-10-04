@@ -30,7 +30,7 @@ export struct VersionBadge {
       case 'release': return '#107C10';
       case 'snapshot': return '#D83B01';
       case 'old_alpha': return '#881798';
-      case 'old_beta': return '#0078D4';
+      case 'old_beta': return '#5C6BC0';
       default: return '#666666';
     }
   }
@@ -61,7 +61,7 @@ export struct AccountTypeBadge {
 
   getBadgeColor(): ResourceColor {
     switch (this.accountType) {
-      case 'microsoft': return '#0078D4';
+      case 'microsoft': return '#5C6BC0';
       case 'authlib_injector': return '#D83B01';
       case 'offline': return '#666666';
       default: return '#666666';
@@ -79,7 +79,7 @@ export struct LoadingView {
       LoadingProgress()
         .width(32)
         .height(32)
-        .color('#0078D4');
+        .color('#5C6BC0');
       Text(this.message)
         .fontSize(14)
         .fontColor('#666666')
@@ -112,7 +112,7 @@ export struct EmptyView {
       if (this.actionText.length > 0) {
         Button(this.actionText)
           .margin({ top: 16 })
-          .backgroundColor('#0078D4')
+          .backgroundColor('#5C6BC0')
           .fontColor(Color.White)
           .borderRadius(6);
       }
@@ -149,7 +149,7 @@ export struct ProgressBar {
         Row()
           .width(`${this.progress * 100}%`)
           .height(6)
-          .backgroundColor('#0078D4')
+          .backgroundColor('#5C6BC0')
           .borderRadius(3);
       }
       .width('100%');
@@ -201,7 +201,7 @@ export struct SectionHeader {
       if (this.actionText.length > 0) {
         Text(this.actionText)
           .fontSize(13)
-          .fontColor('#0078D4')
+          .fontColor('#5C6BC0')
           .onClick(() => {
             this.onActionClick();
           });

@@ -1,7 +1,14 @@
 // Utility functions for HMCL-HarmonyOS
+// 2026-10 重写：修复 UTF-8 解码、大文件读取栈溢出、递归删除、解压、SHA-1 校验
 import fs from '@ohos.file.fs';
+import util from '@ohos.util';
+import zlib from '@ohos.zlib';
+import cryptoFramework from '@ohos.security.cryptoFramework';
+import { BusinessError } from '@ohos.base';
 
 export class FileUtils {
+  private static readonly READ_CHUNK = 65536;
+
   // Check if a file or directory exists
   static exists(path: string): boolean {
     try {
@@ -11,132 +18,309 @@ export class FileUtils {
     }
   }
 
+  static isDirectory(path: string): boolean {
+    try {
+      return fs.statSync(path).isDirectory();
+    } catch {
+      return false;
+    }
+  }
+
   // Create directory recursively
   static mkdirs(dir: string): void {
+    if (!dir || dir.length === 0) {
+      return;
+    }
     try {
       if (!FileUtils.exists(dir)) {
         fs.mkdirSync(dir, true);
       }
     } catch (e) {
-      console.error(`Failed to create dir: ${dir}`, (e as Error).message);
+      console.error(`Failed to create dir: ${dir}, ${(e as BusinessError).message}`);
     }
   }
 
-  // Read file as string
+  /**
+   * 读取文本文件（UTF-8，分块解码）。
+   * 旧实现用 String.fromCharCode(...bytes) —— 对 >100KB 的文件会栈溢出，
+   * 而且按 Latin-1 解码会把中文/UTF-8 内容全部读成乱码，导致版本 JSON 解析失败。
+   */
   static readFile(path: string): string {
+    let file: fs.File | null = null;
     try {
-      if (!FileUtils.exists(path)) return '';
-      const file = fs.openSync(path, fs.OpenMode.READ_ONLY);
-      const stat = fs.statSync(path);
-      const buf = new ArrayBuffer(stat.size);
-      fs.readSync(file.fd, buf, { offset: 0, length: stat.size });
-      fs.closeSync(file);
-      return String.fromCharCode(...new Uint8Array(buf));
-    } catch (e) {
-      console.error(`Failed to read file: ${path}`, (e as Error).message);
-      return '';
-    }
-  }
-
-  // Write string to file
-  static writeFile(path: string, content: string): void {
-    try {
-      const dir = path.substring(0, path.lastIndexOf('/'));
-      FileUtils.mkdirs(dir);
-      const file = fs.openSync(path, fs.OpenMode.CREATE | fs.OpenMode.WRITE_ONLY | fs.OpenMode.TRUNC);
-      fs.writeSync(file.fd, content);
-      fs.closeSync(file);
-    } catch (e) {
-      console.error(`Failed to write file: ${path}`, (e as Error).message);
-    }
-  }
-
-  // Delete file or directory
-  static delete(path: string): void {
-    try {
-      if (FileUtils.exists(path)) {
-        fs.unlinkSync(path);
+      if (!FileUtils.exists(path)) {
+        return '';
       }
-    } catch (e) {
-      console.error(`Failed to delete: ${path}`, (e as Error).message);
-    }
-  }
-
-  // List directory contents
-  static listDir(dir: string): string[] {
-    try {
-      if (!FileUtils.exists(dir)) return [];
-      const files = fs.listFileSync(dir, { recursion: false });
-      const result: string[] = [];
-      // listFileSync might return relative paths
-      for (const f of files) {
-        result.push(f);
+      const size = fs.statSync(path).size;
+      if (size <= 0) {
+        return '';
+      }
+      file = fs.openSync(path, fs.OpenMode.READ_ONLY);
+      const decoder = util.TextDecoder.create('utf-8', { ignoreBOM: true });
+      let result = '';
+      let offset = 0;
+      while (offset < size) {
+        const want = Math.min(FileUtils.READ_CHUNK, size - offset);
+        const buffer = new ArrayBuffer(want);
+        const read = fs.readSync(file.fd, buffer, { offset: offset, length: want });
+        if (read <= 0) {
+          break;
+        }
+        offset += read;
+        const chunk = new Uint8Array(buffer.slice(0, read));
+        result += decoder.decodeWithStream(chunk, { stream: offset < size });
       }
       return result;
     } catch (e) {
-      console.error(`Failed to list dir: ${dir}`, (e as Error).message);
+      console.error(`Failed to read file: ${path}, ${(e as BusinessError).message}`);
+      return '';
+    } finally {
+      if (file !== null) {
+        try {
+          fs.closeSync(file);
+        } catch {
+        }
+      }
+    }
+  }
+
+  /** 写入文本文件（覆盖） */
+  static writeFile(path: string, content: string): void {
+    try {
+      const idx = path.lastIndexOf('/');
+      if (idx > 0) {
+        FileUtils.mkdirs(path.substring(0, idx));
+      }
+      const file = fs.openSync(path, fs.OpenMode.CREATE | fs.OpenMode.WRITE_ONLY | fs.OpenMode.TRUNC);
+      try {
+        fs.writeSync(file.fd, content);
+        fs.fsyncSync(file.fd);
+      } finally {
+        fs.closeSync(file);
+      }
+    } catch (e) {
+      console.error(`Failed to write file: ${path}, ${(e as BusinessError).message}`);
+    }
+  }
+
+  /** 写入二进制（用于 jar / zip 落盘） */
+  static writeBuffer(path: string, data: ArrayBuffer): void {
+    try {
+      const idx = path.lastIndexOf('/');
+      if (idx > 0) {
+        FileUtils.mkdirs(path.substring(0, idx));
+      }
+      const file = fs.openSync(path, fs.OpenMode.CREATE | fs.OpenMode.WRITE_ONLY | fs.OpenMode.TRUNC);
+      try {
+        fs.writeSync(file.fd, data);
+        fs.fsyncSync(file.fd);
+      } finally {
+        fs.closeSync(file);
+      }
+    } catch (e) {
+      console.error(`Failed to write buffer: ${path}, ${(e as BusinessError).message}`);
+    }
+  }
+
+  /** 删除文件或目录（目录递归删除；旧实现只 unlinkSync，对目录必失败） */
+  static delete(path: string): void {
+    try {
+      if (!FileUtils.exists(path)) {
+        return;
+      }
+      const stat = fs.statSync(path);
+      if (stat.isDirectory()) {
+        const entries = fs.listFileSync(path);
+        for (const entry of entries) {
+          FileUtils.delete(`${path}/${entry}`);
+        }
+        fs.rmdirSync(path);
+      } else {
+        fs.unlinkSync(path);
+      }
+    } catch (e) {
+      console.error(`Failed to delete: ${path}, ${(e as BusinessError).message}`);
+    }
+  }
+
+  // List directory contents (names only, no recursion)
+  static listDir(dir: string): string[] {
+    try {
+      if (!FileUtils.exists(dir)) {
+        return [];
+      }
+      return fs.listFileSync(dir);
+    } catch (e) {
+      console.error(`Failed to list dir: ${dir}, ${(e as BusinessError).message}`);
       return [];
     }
   }
 
-  // Get file size
   static getFileSize(path: string): number {
     try {
-      if (!FileUtils.exists(path)) return 0;
-      const stat = fs.statSync(path);
-      return stat.size;
+      if (!FileUtils.exists(path)) {
+        return 0;
+      }
+      return fs.statSync(path).size;
     } catch {
       return 0;
     }
   }
 
-  // Copy file
   static copyFile(src: string, dest: string): void {
     try {
-      const dir = dest.substring(0, dest.lastIndexOf('/'));
-      FileUtils.mkdirs(dir);
+      const idx = dest.lastIndexOf('/');
+      if (idx > 0) {
+        FileUtils.mkdirs(dest.substring(0, idx));
+      }
       fs.copyFileSync(src, dest);
     } catch (e) {
-      console.error(`Failed to copy: ${src} -> ${dest}`, (e as Error).message);
+      console.error(`Failed to copy: ${src} -> ${dest}, ${(e as BusinessError).message}`);
     }
   }
 
-  // Move file
   static moveFile(src: string, dest: string): void {
     try {
+      const idx = dest.lastIndexOf('/');
+      if (idx > 0) {
+        FileUtils.mkdirs(dest.substring(0, idx));
+      }
+      fs.renameSync(src, dest);
+    } catch (e) {
+      // rename 跨设备会失败，退化为 copy + delete
       FileUtils.copyFile(src, dest);
       FileUtils.delete(src);
-    } catch (e) {
-      console.error(`Failed to move: ${src} -> ${dest}`, (e as Error).message);
     }
   }
 
-  // Get file extension
   static getExtension(path: string): string {
     const idx = path.lastIndexOf('.');
     return idx >= 0 ? path.substring(idx).toLowerCase() : '';
   }
 
-  // Generate UUID v4
-  static generateUUID(): string {
-    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
-      const r = Math.random() * 16 | 0;
-      const v = c === 'x' ? r : (r & 0x3 | 0x8);
-      return v.toString(16);
-    });
+  static getDirName(path: string): string {
+    const idx = path.lastIndexOf('/');
+    return idx > 0 ? path.substring(0, idx) : '';
   }
 
-  // Generate UUID v3 from string (offline mode)
+  /**
+   * 计算文件 SHA-1（分块，不整文件读入内存）。
+   * 返回小写十六进制；失败返回空串。
+   */
+  static async sha1File(path: string): Promise<string> {
+    let file: fs.File | null = null;
+    try {
+      if (!FileUtils.exists(path)) {
+        return '';
+      }
+      const size = fs.statSync(path).size;
+      const md = cryptoFramework.createMd('SHA1');
+      file = fs.openSync(path, fs.OpenMode.READ_ONLY);
+      let offset = 0;
+      while (offset < size) {
+        const want = Math.min(FileUtils.READ_CHUNK, size - offset);
+        const buffer = new ArrayBuffer(want);
+        const read = fs.readSync(file.fd, buffer, { offset: offset, length: want });
+        if (read <= 0) {
+          break;
+        }
+        offset += read;
+        const blob: cryptoFramework.DataBlob = { data: new Uint8Array(buffer.slice(0, read)) };
+        // 注意：cryptoFramework 的 Md.update(DataBlob) 单参重载是【异步】的（返回 Promise），
+        // 必须 await。不 await 会让分块只被随机地算进摘要，得到每次都不同的错误哈希。
+        await md.update(blob);
+      }
+      const digest = await md.digest();
+      return FileUtils.bytesToHex(new Uint8Array(digest.data));
+    } catch (e) {
+      console.error(`sha1 failed: ${path}, ${(e as BusinessError).message}`);
+      return '';
+    } finally {
+      if (file !== null) {
+        try {
+          fs.closeSync(file);
+        } catch {
+        }
+      }
+    }
+  }
+
+  static bytesToHex(bytes: Uint8Array): string {
+    let hex = '';
+    for (let i = 0; i < bytes.length; i++) {
+      const v = bytes[i].toString(16);
+      hex += v.length === 1 ? `0${v}` : v;
+    }
+    return hex;
+  }
+
+  /** 生成离线模式 UUID（与用户名一一对应，HMCL 兼容格式） */
   static generateUUIDv3(input: string): string {
-    // Simple hash-based UUID for offline mode (consistent per username)
     let hash = 0;
     for (let i = 0; i < input.length; i++) {
-      const char = input.charCodeAt(i);
-      hash = ((hash << 5) - hash) + char;
-      hash = hash & hash; // Convert to 32bit integer
+      hash = ((hash << 5) - hash) + input.charCodeAt(i);
+      hash = hash & hash;
     }
     const hashStr = Math.abs(hash).toString(16).padStart(8, '0');
-    return `${hashStr}-0000-4000-8000-${hashStr.padStart(12, '0').substring(0, 12)}`;
+    const tail = (hashStr + hashStr + hashStr).substring(0, 12);
+    return `${hashStr}-0000-3000-8000-${tail}`;
+  }
+}
+
+/** 压缩包工具：解压 zip/jar、读取包内单个文本条目 */
+export class ArchiveUtils {
+  /** 解压 zip/jar 到目录 */
+  static async unzip(zipPath: string, destDir: string): Promise<boolean> {
+    try {
+      FileUtils.mkdirs(destDir);
+      await zlib.decompressFile(zipPath, destDir);
+      return true;
+    } catch (e) {
+      console.error(`unzip failed: ${zipPath}, ${(e as BusinessError).message}`);
+      return false;
+    }
+  }
+
+  /**
+   * 读取包内单个文本条目（做法：整体解压到临时目录再读）。
+   * @param zipPath 压缩包路径
+   * @param entryName 包内路径，允许带或不带前导 '/'
+   * @param tempDir 临时解压目录
+   */
+  static async readTextEntry(zipPath: string, entryName: string, tempDir: string): Promise<string> {
+    FileUtils.delete(tempDir);
+    const ok = await ArchiveUtils.unzip(zipPath, tempDir);
+    if (!ok) {
+      return '';
+    }
+    const normalized = entryName.startsWith('/') ? entryName.substring(1) : entryName;
+    const direct = `${tempDir}/${normalized}`;
+    if (FileUtils.exists(direct)) {
+      return FileUtils.readFile(direct);
+    }
+    // 兜底：在解压结果里按文件名查找
+    const base = normalized.substring(normalized.lastIndexOf('/') + 1);
+    const found = ArchiveUtils.findFile(tempDir, base, 0);
+    return found ? FileUtils.readFile(found) : '';
+  }
+
+  private static findFile(dir: string, name: string, depth: number): string {
+    if (depth > 6) {
+      return '';
+    }
+    const entries = FileUtils.listDir(dir);
+    for (const entry of entries) {
+      const full = `${dir}/${entry}`;
+      if (FileUtils.isDirectory(full)) {
+        const hit = ArchiveUtils.findFile(full, name, depth + 1);
+        if (hit.length > 0) {
+          return hit;
+        }
+      } else if (entry === name) {
+        return full;
+      }
+    }
+    return '';
   }
 }
 
@@ -151,6 +335,7 @@ export enum LogLevel {
 export class Logger {
   private static logDir: string = '';
   private static maxLogFiles: number = 5;
+  private static memBuffer: string[] = [];
 
   static init(logDir: string): void {
     Logger.logDir = logDir;
@@ -167,7 +352,7 @@ export class Logger {
   private static rotateLogs(): void {
     try {
       const files = FileUtils.listDir(Logger.logDir)
-        .filter(f => f.startsWith('hmcl_') && f.endsWith('.log'))
+        .filter((f: string) => f.startsWith('hmcl_') && f.endsWith('.log'))
         .sort()
         .reverse();
       while (files.length > Logger.maxLogFiles) {
@@ -177,39 +362,54 @@ export class Logger {
         }
       }
     } catch {
-      // Silently handle rotation errors
     }
   }
 
   private static log(level: LogLevel, tag: string, message: string): void {
     const timestamp = new Date().toISOString();
     const logLine = `[${timestamp}] [${level}] [${tag}] ${message}`;
-    
-    // Console output
     console.info(logLine);
-
-    // File output
+    Logger.memBuffer.push(logLine);
+    if (Logger.memBuffer.length > 500) {
+      Logger.memBuffer.shift();
+    }
     if (Logger.logDir) {
       const logFile = Logger.getLogFileName();
       try {
         const file = fs.openSync(logFile, fs.OpenMode.CREATE | fs.OpenMode.WRITE_ONLY | fs.OpenMode.APPEND);
-        fs.writeSync(file.fd, logLine + '\n');
-        fs.closeSync(file);
+        try {
+          fs.writeSync(file.fd, logLine + '\n');
+        } finally {
+          fs.closeSync(file);
+        }
       } catch {
-        // Silently handle file write errors
       }
     }
   }
 
-  static debug(tag: string, message: string): void { Logger.log(LogLevel.DEBUG, tag, message); }
-  static info(tag: string, message: string): void { Logger.log(LogLevel.INFO, tag, message); }
-  static warn(tag: string, message: string): void { Logger.log(LogLevel.WARN, tag, message); }
+  static debug(tag: string, message: string): void {
+    Logger.log(LogLevel.DEBUG, tag, message);
+  }
+
+  static info(tag: string, message: string): void {
+    Logger.log(LogLevel.INFO, tag, message);
+  }
+
+  static warn(tag: string, message: string): void {
+    Logger.log(LogLevel.WARN, tag, message);
+  }
+
   static error(tag: string, message: string, error?: Error): void {
-    Logger.log(LogLevel.ERROR, tag, `${message} ${error ? error.stack || error.message : ''}`);
+    Logger.log(LogLevel.ERROR, tag, `${message} ${error ? (error.stack || error.message) : ''}`);
+  }
+
+  /** 内存中的最近日志（UI「日志」页用） */
+  static tail(count: number): string {
+    const start = Math.max(0, Logger.memBuffer.length - count);
+    return Logger.memBuffer.slice(start).join('\n');
   }
 }
 
-// String utilities
 export class StringUtils {
   static isBlank(str: string | null | undefined): boolean {
     return str === null || str === undefined || str.trim().length === 0;
@@ -220,10 +420,12 @@ export class StringUtils {
   }
 
   static formatSize(bytes: number): string {
-    if (bytes === 0) return '0 B';
-    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    if (bytes <= 0) {
+      return '0 B';
+    }
+    const units: string[] = ['B', 'KB', 'MB', 'GB', 'TB'];
     const k = 1024;
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    const i = Math.min(units.length - 1, Math.floor(Math.log(bytes) / Math.log(k)));
     const size = parseFloat((bytes / Math.pow(k, i)).toFixed(2));
     return `${size} ${units[i]}`;
   }
@@ -236,8 +438,12 @@ export class StringUtils {
     const seconds = Math.floor(ms / 1000);
     const minutes = Math.floor(seconds / 60);
     const hours = Math.floor(minutes / 60);
-    if (hours > 0) return `${hours}h ${minutes % 60}m`;
-    if (minutes > 0) return `${minutes}m ${seconds % 60}s`;
+    if (hours > 0) {
+      return `${hours}h ${minutes % 60}m`;
+    }
+    if (minutes > 0) {
+      return `${minutes}m ${seconds % 60}s`;
+    }
     return `${seconds}s`;
   }
 
@@ -246,7 +452,6 @@ export class StringUtils {
   }
 }
 
-// JSON utilities
 export class JsonUtils {
   static parse<T>(json: string): T | null {
     try {

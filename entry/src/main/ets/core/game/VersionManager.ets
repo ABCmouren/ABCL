@@ -1,9 +1,11 @@
 // Game version management for HMCL-HarmonyOS
-import { GameInstallation, VersionManifest, GameVersionJson, LoaderType, Library } from '../../model/GameVersion';
+import { GameInstallation, VersionManifest, GameVersionJson, LoaderType, Library, DownloadSource } from '../../model/GameVersion';
 import { AppStore } from '../AppStore';
 import { Logger, FileUtils } from '../util/Utils';
 import { HttpClient } from '../network/HttpClient';
 import { Constants } from '../../config/Constants';
+import { VersionInstaller, InstallProgressFn } from './VersionInstaller';
+import { CancelToken } from '../download/DownloadEngine';
 
 export class VersionManager {
   private static readonly TAG = 'VersionManager';
@@ -110,69 +112,57 @@ export class VersionManager {
     return null;
   }
 
-  // Install a Minecraft version
-  async installVersion(versionId: string): Promise<void> {
-    Logger.info(VersionManager.TAG, `Installing version: ${versionId}`);
-    
-    // Get manifest to find version URL
-    const manifest = await this.fetchVersionManifest();
-    const version = manifest.versions.find(v => v.id === versionId);
-    if (!version) {
-      throw new Error(`Version ${versionId} not found in manifest`);
-    }
+  /**
+   * 完整安装一个 Minecraft 版本。
+   *
+   * 2026-10 修复：旧实现只下载 version json + client.jar，既不下载 libraries
+   * 也不下载 assets，所以"安装成功"的版本启动必然失败。现在整套流程交给
+   * VersionInstaller（版本元数据 → client.jar → libraries → natives → logging → assets）。
+   */
+  async installVersion(
+    versionId: string,
+    onProgress?: InstallProgressFn,
+    token?: CancelToken
+  ): Promise<void> {
+    Logger.info(VersionManager.TAG, `安装版本 ${versionId}（下载源：${this.store.config.downloadSource}）`);
+    this.initMinecraftDir();
 
-    // Fetch version JSON
-    const versionJson = await HttpClient.getJson<GameVersionJson>(version.url);
-    if (!versionJson.success || !versionJson.data) {
-      throw new Error(`Failed to fetch version JSON for ${versionId}`);
-    }
+    const useMirror = this.store.config.downloadSource !== DownloadSource.MOJANG;
+    await VersionInstaller.install({
+      mcDir: this.getMinecraftDir(),
+      versionId: versionId,
+      useMirror: useMirror,
+      osArch: Constants.osArch,
+      onProgress: onProgress,
+      token: token
+    });
 
-    const vData = versionJson.data;
-
-    // Create version directory
-    const versionDir = `${this.getVersionsDir()}/${versionId}`;
-    FileUtils.mkdirs(versionDir);
-
-    // Save version JSON
-    FileUtils.writeFile(
-      `${versionDir}/${versionId}.json`,
-      JSON.stringify(vData, null, 2)
-    );
-
-    // Download client jar
-    if (vData.downloads?.client?.url) {
-      const clientPath = `${versionDir}/${versionId}.jar`;
-      Logger.info(VersionManager.TAG, `Downloading client jar: ${vData.downloads.client.url}`);
-      await HttpClient.downloadFile(vData.downloads.client.url, clientPath);
-    }
-
-    Logger.info(VersionManager.TAG, `Version ${versionId} installed successfully`);
+    this.getLocalVersions();
+    Logger.info(VersionManager.TAG, `版本 ${versionId} 安装完成`);
   }
 
-  // Remove a Minecraft version
+  // Remove a Minecraft version（含子目录递归删除）
   async removeVersion(versionId: string): Promise<void> {
     const versionDir = `${this.getVersionsDir()}/${versionId}`;
-    if (FileUtils.exists(versionDir)) {
-      const files = FileUtils.listDir(versionDir);
-      for (const file of files) {
-        FileUtils.delete(`${versionDir}/${file}`);
-      }
-      FileUtils.delete(versionDir);
-    }
+    FileUtils.delete(versionDir);
     this.store.installations = this.store.installations.filter(
       inst => inst.versionId !== versionId
     );
+    this.store.setInstallations(this.store.installations);
   }
 
   // Get versions directory path
   private getVersionsDir(): string {
-    const gameDir = this.store.config.gameDirectory || `${Constants.APP_DIR}${Constants.MINECRAFT_DIR}`;
-    return `${gameDir}/${Constants.VERSIONS_DIR}`;
+    return `${this.getMinecraftDir()}/${Constants.VERSIONS_DIR}`;
   }
 
-  // Get Minecraft directory path
+  // Get Minecraft directory path（沙箱根由 EntryAbility 注入，见 Constants.appDir）
   getMinecraftDir(): string {
-    return this.store.config.gameDirectory || `${Constants.APP_DIR}${Constants.MINECRAFT_DIR}`;
+    const configured = this.store.config.gameDirectory;
+    if (configured && configured.length > 0) {
+      return configured;
+    }
+    return Constants.baseDir();
   }
 
   // Get main class for a version (follows inheritsFrom chain)

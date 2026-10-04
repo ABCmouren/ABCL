@@ -175,7 +175,10 @@ export class NativesManager {
     Logger.info(NativesManager.TAG, `Downloading native lib: ${url}`);
 
     FileUtils.mkdirs(targetPath.substring(0, targetPath.lastIndexOf('/')));
-    await HttpClient.downloadFile(url, targetPath);
+    const outcome = await HttpClient.downloadToFile(url, targetPath, 0);
+    if (!outcome.success) {
+      throw new Error(`原生库下载失败: ${outcome.error}`);
+    }
 
     Logger.info(NativesManager.TAG, `Downloaded native lib: ${libName}`);
   }
