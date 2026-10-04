@@ -158,7 +158,8 @@ export class HttpClient {
     savePath: string,
     expectedSize: number,
     onProgress?: DownloadProgressFn,
-    resume: boolean = true
+    resume: boolean = true,
+    headers?: Record<string, string>
   ): Promise<DownloadOutcome> {
     const failure = (error: string, statusCode: number): DownloadOutcome => {
       return { success: false, path: savePath, bytes: 0, statusCode: statusCode, error: error };
@@ -177,6 +178,13 @@ export class HttpClient {
       }
 
       const extraHeaders: Record<string, string> = {};
+      // 调用方自定义的头（OptiFine 反爬需要 UA + Referer），先放进去
+      // 再让断点续传的 Range 覆盖同名项
+      if (headers !== undefined) {
+        for (const k of Object.keys(headers)) {
+          extraHeaders[k] = headers[k];
+        }
+      }
       if (startOffset > 0) {
         extraHeaders['Range'] = `bytes=${startOffset}-`;
       }

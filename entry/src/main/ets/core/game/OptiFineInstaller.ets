@@ -70,7 +70,7 @@ export class OptiFineInstaller {
 
     for (const u of urls) {
       try {
-        const res = await HttpClient.getJson<BmclOptiFine[]>(u, { 'User-Agent': 'ABCL/2.0' }, 20000);
+        const res = await HttpClient.getJson<BmclOptiFine[]>(u, OptiFineInstaller.headers(), 20000);
         if (!res.success || !res.data || res.data.length === 0) { continue; }
         for (const item of res.data) {
           const type = item.type ? item.type : "";
@@ -104,16 +104,30 @@ export class OptiFineInstaller {
     return out;
   }
 
+  /**
+   * 请求头。
+   * optifine.net 有反爬：裸请求 403，带 User-Agent 与 Referer
+   *（模拟从 CurseForge 点进来）即可正常下载。
+   */
+  private static headers(): Record<string, string> {
+    const h: Record<string, string> = {};
+    h['User-Agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) ABCL/2.0';
+    h['Referer'] = 'https://www.curseforge.com/';
+    return h;
+  }
+
   private static buildUrls(mcVersion: string, selfVersion: string, filename: string): string[] {
     const lookup = OptiFineInstaller.toLookupVersion(mcVersion);
     const file = filename.length > 0 ? filename :
-      ("OptiFine_" + lookup + "_" + selfVersion + ".jar");
+      ('OptiFine_' + lookup + '_' + selfVersion + '.jar');
     const urls: string[] = [];
     if (DownloadSettings.useMirror()) {
-      urls.push(Mirrors.BMCLAPI_ORIGIN + "/optifine/" + lookup + "/" + selfVersion + "/" + file);
-      urls.push(Mirrors.MODRINTH_ORIGIN + "/optifine/" + lookup + "/" + selfVersion + "/" + file);
+      // HMCL 的 mirror 规则是 {bmcl}/optifine/{mc}/{type}/{patch}，不带文件名；
+      // 实测 BMCLAPI 会 302 到 /maven/com/optifine/… 再跳 CDN。
+      urls.push(Mirrors.BMCLAPI_ORIGIN + '/optifine/' + lookup + '/' + selfVersion);
+      urls.push(Mirrors.BMCLAPI_ORIGIN + '/maven/com/optifine/' + lookup + '/' + file);
     }
-    urls.push("https://optifine.net/download?filename=" + encodeURIComponent(file));
+    urls.push('https://optifine.net/download?filename=' + encodeURIComponent(file));
     return urls;
   }
 
@@ -126,7 +140,8 @@ export class OptiFineInstaller {
     }
     for (const u of remote.urls) {
       try {
-        const outcome = await HttpClient.downloadToFile(u, target, 0, undefined, true);
+        const outcome = await HttpClient.downloadToFile(u, target, 0,
+          undefined, true, OptiFineInstaller.headers());
         if (outcome.success) { return target; }
         Logger.warn(OptiFineInstaller.TAG, '下载失败 ' + u);
       } catch (e) {
