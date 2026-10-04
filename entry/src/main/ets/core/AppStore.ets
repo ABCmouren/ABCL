@@ -124,6 +124,7 @@ export class AppStore {
       closeLauncherOnLaunch: config.closeLauncherOnLaunch !== undefined ? config.closeLauncherOnLaunch : this.config.closeLauncherOnLaunch,
       showLog: config.showLog !== undefined ? config.showLog : this.config.showLog,
       showGameLog: config.showGameLog !== undefined ? config.showGameLog : this.config.showGameLog,
+      isolationType: config.isolationType !== undefined ? config.isolationType : this.config.isolationType,
       fontSize: config.fontSize !== undefined ? config.fontSize : this.config.fontSize,
       showSidebar: config.showSidebar !== undefined ? config.showSidebar : this.config.showSidebar
     };
@@ -143,6 +144,36 @@ export class AppStore {
     this.notifyInstallationsChanged();
     // Auto-persist
     this.persistInstallations();
+  }
+
+  /** 新增实例（复制实例等），同样要产生新数组才会触发 @State 重绘 */
+  addInstallation(inst: GameInstallation): void {
+    const next: GameInstallation[] = [];
+    for (const i of this.installations) {
+      next.push(i);
+    }
+    next.push(inst);
+    this.installations = next;
+    this.notifyInstallationsChanged();
+    this.persistInstallations();
+  }
+
+  /** 移除实例 */
+  removeInstallation(versionId: string): void {
+    this.installations = this.installations.filter((i: GameInstallation) => i.versionId !== versionId);
+    if (this.selectedInstallation !== null && this.selectedInstallation.versionId === versionId) {
+      this.selectedInstallation = this.installations.length > 0 ? this.installations[0] : null;
+    }
+    this.notifyInstallationsChanged();
+    this.persistInstallations();
+  }
+
+  /** 选出要操作的实例（没有选中就取第一个） */
+  activeInstallation(): GameInstallation | null {
+    if (this.selectedInstallation !== null) {
+      return this.selectedInstallation;
+    }
+    return this.installations.length > 0 ? this.installations[0] : null;
   }
 
   /** 订阅配置变化（可多页面同时订阅，返回取消订阅函数） */

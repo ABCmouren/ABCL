@@ -12,6 +12,8 @@ import { VersionManager } from '../../core/game/VersionManager';
 import { VersionInstaller } from '../../core/game/VersionInstaller';
 import { ModLoaderInstaller, ModLoader, LoaderVersion } from '../../core/game/ModLoaderInstaller';
 import { LaunchEngine } from '../../core/launch/LaunchEngine';
+import { InstanceManager } from '../../core/game/InstanceManager';
+import { GameDirectoryResolver } from '../../core/game/GameDirectoryResolver';
 import { Account } from '../../model/Account';
 import { Logger, StringUtils } from '../../core/util/Utils';
 import { HmclTheme } from '../../theme/HmclTheme';
@@ -63,6 +65,9 @@ export default struct GameListPage {
   // 实例操作菜单
   @State menuVisible: boolean = false;
   @State menuInstance: GameInstallation | null = null;
+  @State renameMode: boolean = false;
+  @State renameText: string = '';
+  @State toastText: string = '';
 
   // 加载器安装面板
   @State pickMode: string = 'mc';
@@ -439,6 +444,63 @@ export default struct GameListPage {
   private showRowMenu(inst: GameInstallation): void {
     this.menuInstance = inst;
     this.menuVisible = true;
+    this.renameMode = false;
+    this.renameText = '';
+  }
+
+  // ============================================================
+  //  实例管理动作
+  // ============================================================
+  private commitRename(): void {
+    if (this.menuInstance === null) {
+      return;
+    }
+    const ok = InstanceManager.rename(this.menuInstance, this.renameText);
+    if (!ok) {
+      this.toastText = '重命名失败：名称为空或已存在';
+    } else {
+      this.toastText = '已重命名为 ' + this.renameText;
+    }
+    this.renameMode = false;
+    this.menuVisible = false;
+    this.loadGames();
+  }
+
+  private async duplicateInstance(inst: GameInstallation): Promise<void> {
+    this.toastText = '正在复制实例…';
+    const copy = await InstanceManager.duplicate(inst);
+    if (copy === null) {
+      this.toastText = '复制失败';
+    } else {
+      this.toastText = '已复制为 ' + copy.name;
+    }
+    this.loadGames();
+  }
+
+  private toggleIsolation(inst: GameInstallation): void {
+    const now = !GameDirectoryResolver.isIsolated(inst);
+    inst.isolated = now;
+    GameDirectoryResolver.ensureForInstance(inst);
+    this.store.setInstallations(this.store.installations.slice());
+    this.toastText = now
+      ? '已开启版本隔离：' + GameDirectoryResolver.isolatedRoot(inst)
+      : '已关闭版本隔离，将与其他实例共享目录';
+    this.loadGames();
+  }
+
+  private async exportInstance(inst: GameInstallation): Promise<void> {
+    this.toastText = '正在导出整合包…';
+    const outDir = `${GameDirectoryResolver.contentRoot(inst)}/modpacks`;
+    const path = await InstanceManager.exportModpack(inst, outDir);
+    this.toastText = path.length > 0 ? '已导出到 ' + path : '导出失败';
+  }
+
+  private async deleteInstance(inst: GameInstallation): Promise<void> {
+    this.toastText = '正在删除实例…';
+    const ok = await InstanceManager.remove(inst);
+    this.toastText = ok ? '已删除 ' + inst.name : '删除失败';
+    this.selectedIndex = -1;
+    this.loadGames();
   }
 
   @Builder
@@ -481,12 +543,59 @@ export default struct GameListPage {
           this.openLoaderPanel(this.menuInstance, ModLoader.NEO_FORGE);
         }
       });
+
+      // ===== 实例管理（对齐 HMCL 实例右键菜单）=====
+      this.MenuItem(this.renameMode ? '保存新名称' : '重命名实例', HmclTheme.ON_SURFACE, () => {
+        if (this.renameMode) {
+          this.commitRename();
+          return;
+        }
+        if (this.menuInstance) {
+          this.renameText = this.menuInstance.name;
+          this.renameMode = true;
+        }
+      });
+      if (this.renameMode) {
+        TextInput({ placeholder: '新的实例名', text: this.renameText })
+          .width('100%')
+          .height(34)
+          .fontSize(13)
+          .margin({ bottom: 8 })
+          .backgroundColor(HmclTheme.SURFACE_CONTAINER)
+          .borderRadius(8)
+          .onChange((v: string) => {
+            this.renameText = v;
+          });
+      }
+
+      this.MenuItem('复制实例', HmclTheme.ON_SURFACE, () => {
+        this.menuVisible = false;
+        if (this.menuInstance) {
+          void this.duplicateInstance(this.menuInstance);
+        }
+      });
+
+      this.MenuItem(
+        this.menuInstance !== null && GameDirectoryResolver.isIsolated(this.menuInstance)
+          ? '关闭版本隔离' : '开启版本隔离',
+        HmclTheme.ON_SURFACE, () => {
+          this.menuVisible = false;
+          if (this.menuInstance) {
+            this.toggleIsolation(this.menuInstance);
+          }
+        });
+
+      this.MenuItem('导出整合包', HmclTheme.ON_SURFACE, () => {
+        this.menuVisible = false;
+        if (this.menuInstance) {
+          void this.exportInstance(this.menuInstance);
+        }
+      });
+
       this.MenuItem('删除实例', HmclTheme.ERROR, () => {
         this.menuVisible = false;
         if (this.menuInstance) {
-          void this.versionManager.removeVersion(this.menuInstance.versionId);
-          this.selectedIndex = -1;
-          this.loadGames();
+          void this.deleteInstance(this.menuInstance);
         }
       });
       this.MenuItem('取消', HmclTheme.ON_SURFACE_VARIANT, () => {

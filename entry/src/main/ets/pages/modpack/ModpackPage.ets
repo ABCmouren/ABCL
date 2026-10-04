@@ -10,6 +10,8 @@
  */
 import { InstalledModpack, ModpackManager } from '../../core/modplatform/ModpackManager';
 import { VersionManager } from '../../core/game/VersionManager';
+import { GameDirectoryResolver } from '../../core/game/GameDirectoryResolver';
+import { AppStore } from '../../core/AppStore';
 import { HmclTheme } from '../../theme/HmclTheme';
 import { FileUtils, Logger, StringUtils } from '../../core/util/Utils';
 import { EmptyView, LoadingView } from '../../components/common/CommonComponents';
@@ -27,13 +29,19 @@ export default struct ModpackPage {
   @State applyNote: string = '';
 
   private versionManager = VersionManager.getInstance();
+  private store = AppStore.getInstance();
 
   aboutToAppear(): void {
     this.reload();
   }
 
+  /**
+   * 本页操作的游戏目录 = 当前选中实例的内容目录。
+   * 走 GameDirectoryResolver 而不是全局 getMinecraftDir()，
+   * 这样版本隔离的实例才会读自己的 mods/、saves/。
+   */
   private mcDir(): string {
-    return this.versionManager.getMinecraftDir();
+    return GameDirectoryResolver.contentRoot(this.store.selectedInstallation);
   }
 
   private reload(): void {

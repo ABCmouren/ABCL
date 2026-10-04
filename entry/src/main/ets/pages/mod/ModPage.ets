@@ -14,6 +14,7 @@ import { VersionManager } from '../../core/game/VersionManager';
 import { HmclTheme } from '../../theme/HmclTheme';
 import { Logger, StringUtils } from '../../core/util/Utils';
 import { AppStore } from '../../core/AppStore';
+import { GameDirectoryResolver } from '../../core/game/GameDirectoryResolver';
 import { EmptyView, LoadingView } from '../../components/common/CommonComponents';
 
 @Component
@@ -32,8 +33,13 @@ export default struct ModPage {
     this.reload();
   }
 
+  /**
+   * 本页操作的游戏目录 = 当前选中实例的内容目录。
+   * 走 GameDirectoryResolver 而不是全局 getMinecraftDir()，
+   * 这样版本隔离的实例才会读自己的 mods/、saves/。
+   */
   private mcDir(): string {
-    return this.versionManager.getMinecraftDir();
+    return GameDirectoryResolver.contentRoot(this.store.selectedInstallation);
   }
 
   private reload(): void {

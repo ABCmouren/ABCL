@@ -38,6 +38,42 @@ export interface GameInstallation {
   fullscreen: boolean;
   customJvmArgs: string;
   customGameArgs: string;
+
+  /**
+   * 版本隔离：实例是否使用独立的游戏目录。
+   *
+   * 隔离后 mods / saves / config 等放在 instances/<name>/ 下，
+   * 多个实例互不干扰；versions / libraries / assets 仍共享，避免重复占磁盘。
+   * 对应 HMCL 的 GameSettings.isolation。
+   */
+  isolated?: boolean;
+}
+
+/** 隔离策略，对齐 HMCL 的 DefaultIsolationType */
+export enum IsolationType {
+  /** 总是隔离 */
+  ALWAYS = 'always',
+  /** 只有装了加载器（Forge/Fabric/NeoForge/Quilt）才隔离 —— HMCL 的默认值 */
+  MODDED = 'modded',
+  /** 从不隔离 */
+  NEVER = 'never'
+}
+
+/** 该实例按策略是否应该隔离 */
+export function shouldIsolate(inst: GameInstallation, policy: IsolationType): boolean {
+  if (inst.isolated !== undefined) {
+    // 实例上的显式设置优先于全局策略
+    return inst.isolated;
+  }
+  if (policy === IsolationType.ALWAYS) {
+    return true;
+  }
+  if (policy === IsolationType.NEVER) {
+    return false;
+  }
+  // MODDED：只有非原版才隔离
+  const lt = inst.loaderType;
+  return lt !== null && lt !== LoaderType.VANILLA && lt !== LoaderType.NONE;
 }
 
 export enum LoaderType {

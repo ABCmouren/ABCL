@@ -31,6 +31,8 @@ export interface LauncherConfig {
   closeLauncherOnLaunch: boolean;
   showLog: boolean;
   showGameLog: boolean;
+  /** 版本隔离策略，对齐 HMCL 的 DefaultIsolationType（默认 modded） */
+  isolationType: string;
 
   // UI settings
   fontSize: number;
@@ -53,6 +55,7 @@ export const DefaultConfig: LauncherConfig = {
   closeLauncherOnLaunch: false,
   showLog: false,
   showGameLog: false,
+  isolationType: 'modded',
   fontSize: 14,
   showSidebar: true
 };

@@ -15,7 +15,9 @@ import { DirUsage, GameDirectory } from '../../core/game/GameDirectory';
 import { VersionManager } from '../../core/game/VersionManager';
 import { AppStore } from '../../core/AppStore';
 import { HmclTheme } from '../../theme/HmclTheme';
-import { FileUtils, Logger } from '../../core/util/Utils';
+import { ArchiveUtils, FileUtils, Logger } from '../../core/util/Utils';
+import { FileExchange } from '../../core/util/FileExchange';
+import { InstanceManager } from '../../core/game/InstanceManager';
 import { EmptyView, LoadingView } from '../../components/common/CommonComponents';
 
 @Component
@@ -61,6 +63,64 @@ export default struct GameDirPage {
   }
 
   @State measuring: boolean = false;
+
+  @State exporting: boolean = false;
+
+  /** 导出整个 .minecraft 目录到用户可见位置 */
+  private async exportDir(): Promise<void> {
+    this.exporting = true;
+    this.message = '正在打包，请稍候…';
+    this.error = '';
+    const d = new Date();
+    const name = 'ABCL-minecraft-' + d.getFullYear() +
+      String(d.getMonth() + 1).padStart(2, '0') + String(d.getDate()).padStart(2, '0') + '.zip';
+    const uri = await FileExchange.exportGameDir(this.mcDir(), name);
+    this.exporting = false;
+    if (uri.length > 0) {
+      this.message = '已导出：' + uri;
+    } else {
+      this.message = '已取消导出';
+    }
+  }
+
+  /** 导入外部的 .minecraft 备份 zip，合并进当前目录 */
+  private async importDir(): Promise<void> {
+    this.message = '请选择一个 zip 文件…';
+    this.error = '';
+    const stage = this.mcDir() + '/.import-tmp';
+    const zip = await FileExchange.importFromPicker(stage);
+    if (zip.length === 0) {
+      this.message = '已取消导入';
+      return;
+    }
+    this.message = '正在解包并合并…';
+    const target = stage + '/unpacked';
+    const ok = await ArchiveUtils.unzip(zip, target);
+    if (!ok) {
+      this.error = '解包失败：文件可能不是有效的 zip';
+      this.message = '';
+      FileUtils.delete(stage);
+      return;
+    }
+    const n = InstanceManager.copyTree(target, this.mcDir());
+    FileUtils.delete(stage);
+    this.message = '已合并 ' + n + ' 项到游戏目录';
+    this.reload();
+  }
+
+  /** 直接挑一个外部目录作为游戏目录 */
+  private async pickDir(): Promise<void> {
+    this.message = '请选择一个目录…';
+    this.error = '';
+    const picked = await FileExchange.chooseGameDir();
+    if (picked.length === 0) {
+      this.message = '已取消';
+      return;
+    }
+    this.pathInput = picked;
+    this.editingPath = true;
+    this.message = '已选择：' + picked + '，点保存生效';
+  }
 
   private ensureSkeleton(): void {
     const created = GameDirectory.ensureSkeleton(this.mcDir());
@@ -149,15 +209,16 @@ export default struct GameDirPage {
         .margin({ top: 8 });
 
       Row() {
-        Button('补建缺失目录')
+        Button(this.exporting ? '正在打包…' : '打开 .minecraft 文件夹')
           .layoutWeight(1)
           .height(34)
           .fontSize(12)
           .fontColor(HmclTheme.ON_PRIMARY_CONTAINER)
           .backgroundColor(HmclTheme.PRIMARY_CONTAINER)
           .borderRadius(8)
+          .enabled(!this.exporting)
           .onClick(() => {
-            this.ensureSkeleton();
+            void this.exportDir();
           });
         Text('总占用')
           .fontSize(11)
@@ -172,6 +233,41 @@ export default struct GameDirPage {
       }
       .width('100%')
       .margin({ top: 12 });
+
+      Row() {
+        Button('导入 .minecraft 备份')
+          .layoutWeight(1)
+          .height(32)
+          .fontSize(11)
+          .fontColor(HmclTheme.ON_SURFACE_VARIANT)
+          .backgroundColor(HmclTheme.SURFACE_CONTAINER)
+          .borderRadius(8)
+          .onClick(() => {
+            void this.importDir();
+          });
+        Text('从外部选择')
+          .layoutWeight(1)
+          .height(32)
+          .fontSize(11)
+          .fontColor(HmclTheme.ON_SURFACE_VARIANT)
+          .textAlign(TextAlign.Center)
+          .backgroundColor(HmclTheme.SURFACE_CONTAINER)
+          .borderRadius(8)
+          .margin({ left: 8 })
+          .onClick(() => {
+            void this.pickDir();
+          });
+      }
+      .width('100%')
+      .margin({ top: 8 });
+
+      Text('鸿蒙没有「用文件管理器打开目录」的接口，沙箱路径对外也不可见，' +
+        '所以「打开」的实现是：把整个目录打包成 zip，再让你存到手机/电脑能访问的位置；' +
+        '「导入」反过来，可以把外部的 .minecraft 备份拷回来。')
+        .fontSize(10)
+        .fontColor(HmclTheme.OUTLINE)
+        .width('100%')
+        .margin({ top: 8 });
 
       if (this.message.length > 0) {
         Text(this.message)

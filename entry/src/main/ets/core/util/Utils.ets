@@ -114,6 +114,66 @@ export class FileUtils {
     }
   }
 
+  /** 读整个文件为字节（导出到用户可见位置用） */
+  static readFileBytes(path: string): Uint8Array | null {
+    try {
+      if (!FileUtils.exists(path)) {
+        return null;
+      }
+      const size = fs.statSync(path).size;
+      const file = fs.openSync(path, fs.OpenMode.READ_ONLY);
+      try {
+        const buf = new ArrayBuffer(size);
+        fs.readSync(file.fd, buf, { offset: 0, length: size });
+        return new Uint8Array(buf);
+      } finally {
+        fs.closeSync(file);
+      }
+    } catch (e) {
+      Logger.error('FileUtils', 'readFileBytes 失败: ' + path);
+      return null;
+    }
+  }
+
+  /** 把字节写到用户通过 picker 选出的 uri */
+  static writeBytesToUri(uri: string, data: Uint8Array): boolean {
+    try {
+      const file = fs.openSync(uri, fs.OpenMode.CREATE | fs.OpenMode.WRITE_ONLY | fs.OpenMode.TRUNC);
+      try {
+        let written = 0;
+        const chunk = 65536;
+        while (written < data.length) {
+          const n = Math.min(chunk, data.length - written);
+          const slice: Uint8Array = data.subarray(written, written + n);
+          fs.writeSync(file.fd, slice.buffer);
+          written += n;
+        }
+        fs.fsyncSync(file.fd);
+      } finally {
+        fs.closeSync(file);
+      }
+      return true;
+    } catch (e) {
+      Logger.error('FileUtils', 'writeBytesToUri 失败: ' + uri);
+      return false;
+    }
+  }
+
+  /** 从 picker 给出的 uri 复制到沙箱内路径 */
+  static copyFromUri(uri: string, destPath: string): boolean {
+    try {
+      const idx = destPath.lastIndexOf('/');
+      if (idx > 0) {
+        FileUtils.mkdirs(destPath.substring(0, idx));
+      }
+      fs.copyFileSync(uri, destPath);
+      return true;
+    } catch (e) {
+      Logger.error('FileUtils', 'copyFromUri 失败: ' + uri);
+      return false;
+    }
+  }
+
   /** 写入文本文件（覆盖） */
   static writeFile(path: string, content: string): void {
     try {
@@ -308,6 +368,27 @@ export class FileUtils {
 
 /** 压缩包工具：解压 zip/jar、读取包内单个文本条目 */
 export class ArchiveUtils {
+  /** 把目录打包成 zip（导出整合包、备份世界都走这里） */
+  static async zipDir(srcDir: string, zipPath: string): Promise<boolean> {
+    try {
+      if (!FileUtils.exists(srcDir)) {
+        return false;
+      }
+      const idx = zipPath.lastIndexOf('/');
+      if (idx > 0) {
+        FileUtils.mkdirs(zipPath.substring(0, idx));
+      }
+      const options: zlib.Options = {
+        level: zlib.CompressLevel.COMPRESS_LEVEL_DEFAULT_COMPRESSION
+      };
+      await zlib.compressFile(srcDir, zipPath, options);
+      return true;
+    } catch (e) {
+      console.error(`zipDir failed: ${zipPath}, ${(e as BusinessError).message}`);
+      return false;
+    }
+  }
+
   /** 解压 zip/jar 到目录 */
   static async unzip(zipPath: string, destDir: string): Promise<boolean> {
     try {
