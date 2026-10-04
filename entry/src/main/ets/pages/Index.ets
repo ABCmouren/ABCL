@@ -21,6 +21,7 @@ import { HMCL_NAV, HmclTheme, NavEntry } from '../theme/HmclTheme';
 import { AppStore } from '../core/AppStore';
 import { Account } from '../model/Account';
 import { GameInstallation } from '../model/GameVersion';
+import { I18n } from '../core/i18n/I18n';
 
 @Entry
 @Component
@@ -32,6 +33,8 @@ struct Index {
    * 不能在 build() 里调 this.accountLabel() —— ArkUI V1 不追踪方法返回值，
    * 结果就是切账号后侧栏不动，得切一次页面（触发重建）才显示。
    */
+  /** 语言切换后要重建侧栏标签，所以存一个版本号参与 @State 依赖 */
+  @State localeVersion: number = 0;
   @State accountLabelText: string = '未登录';
   @State statusText: string = '';
 
@@ -40,6 +43,10 @@ struct Index {
   private unsubscribeInstallations: (() => void) | null = null;
 
   aboutToAppear(): void {
+    I18n.init();
+    I18n.onLocaleChanged(() => {
+      this.localeVersion++;
+    });
     this.refreshAccountLabel();
     this.refreshStatus();
     // 订阅全局状态：账户/实例一变，侧栏与状态条立即刷新
@@ -122,9 +129,9 @@ struct Index {
 
       Blank();
 
-      this.TitleAction('下载', 'download');
-      this.TitleAction('账户', 'accounts');
-      this.TitleAction('设置', 'settings');
+      this.TitleAction('nav.download', 'download');
+      this.TitleAction('nav.accounts', 'accounts');
+      this.TitleAction('nav.settings', 'settings');
     }
     .width('100%')
     .height(HmclTheme.TITLE_BAR_HEIGHT)
@@ -135,7 +142,7 @@ struct Index {
 
   @Builder
   TitleAction(label: string, key: string) {
-    Text(label)
+    Text(I18n.t(label))
       .fontSize(13)
       .fontColor(this.currentNav === key ? HmclTheme.PRIMARY : HmclTheme.ON_SURFACE_VARIANT)
       .fontWeight(this.currentNav === key ? FontWeight.Bold : FontWeight.Normal)
@@ -158,7 +165,7 @@ struct Index {
             .textAlign(TextAlign.Center)
             .fontColor(this.currentNav === item.key
               ? HmclTheme.ON_PRIMARY_CONTAINER : HmclTheme.ON_SURFACE_VARIANT);
-          Text(item.label)
+          Text(I18n.t(item.label))
             .fontSize(14)
             .margin({ left: 8 })
             .fontColor(this.currentNav === item.key
@@ -173,7 +180,9 @@ struct Index {
         .onClick(() => {
           this.currentNav = item.key;
         })
-      }, (item: NavEntry) => item.key)
+      // key 里带上 localeVersion：切语言时 ArkUI 必须重建这些行，
+      // 否则 label 是静态方法的返回值，界面不会刷新（本项目第四次踩这个坑）。
+      }, (item: NavEntry) => `${item.key}|${this.localeVersion}`)
 
       Blank();
 

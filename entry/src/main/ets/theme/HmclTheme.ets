@@ -65,17 +65,21 @@ export interface NavEntry {
   glyph: string;
 }
 
+/**
+ * 侧栏导航。
+ * label 是 i18n key（nav.xxx），实际显示时用 I18n.t() 取值。
+ */
 export const HMCL_NAV: NavEntry[] = [
-  { key: 'instances', label: '实例列表', glyph: '▤' },
-  { key: 'download', label: '下载', glyph: '⤓' },
-  { key: 'accounts', label: '账户', glyph: '☺' },
-  { key: 'mods', label: '模组', glyph: '❖' },
-  { key: 'resourcepacks', label: '资源包', glyph: '◫' },
-  { key: 'shaders', label: '光影', glyph: '✦' },
-  { key: 'worlds', label: '世界', glyph: '◍' },
-  { key: 'modpacks', label: '整合包', glyph: '⛁' },
-  { key: 'gamedir', label: '游戏目录', glyph: '🗀' },
-  { key: 'java', label: 'Java', glyph: '☕' },
-  { key: 'logs', label: '日志', glyph: '☰' },
-  { key: 'settings', label: '设置', glyph: '⚙' },
+  { key: 'instances', label: 'nav.instances', glyph: '▤' },
+  { key: 'download', label: 'nav.download', glyph: '⤓' },
+  { key: 'accounts', label: 'nav.accounts', glyph: '☺' },
+  { key: 'mods', label: 'nav.mods', glyph: '❖' },
+  { key: 'resourcepacks', label: 'nav.resourcepacks', glyph: '◫' },
+  { key: 'shaders', label: 'nav.shaders', glyph: '✦' },
+  { key: 'worlds', label: 'nav.worlds', glyph: '◍' },
+  { key: 'modpacks', label: 'nav.modpacks', glyph: '⛁' },
+  { key: 'gamedir', label: 'nav.gamedir', glyph: '🗀' },
+  { key: 'java', label: 'nav.java', glyph: '☕' },
+  { key: 'logs', label: 'nav.logs', glyph: '☰' },
+  { key: 'settings', label: 'nav.settings', glyph: '⚙' },
 ];

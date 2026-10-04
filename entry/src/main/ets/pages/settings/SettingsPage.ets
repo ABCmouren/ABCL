@@ -3,6 +3,9 @@ import { LauncherConfig, DefaultConfig, ThemeMode } from '../../model/LauncherCo
 import { DownloadSource } from '../../model/GameVersion';
 import { AppStore } from '../../core/AppStore';
 import { SectionHeader, Card } from '../../components/common/CommonComponents';
+import { I18n } from '../../core/i18n/I18n';
+import { ModLoaderInstaller } from '../../core/game/ModLoaderInstaller';
+import { DownloadSettings } from '../../core/download/DownloadSettings';
 
 @Component
 export default struct SettingsPage {
@@ -16,6 +19,9 @@ export default struct SettingsPage {
   @State downloadThreads: number = 4;
   @State closeOnLaunch: boolean = false;
   @State showGameLog: boolean = true;
+  @State locale: string = 'zh-CN';
+  @State proxy: string = '';
+  @State isolationType: string = 'modded';
 
   private store = AppStore.getInstance();
 
@@ -30,6 +36,9 @@ export default struct SettingsPage {
     this.downloadThreads = this.config.downloadThreads;
     this.closeOnLaunch = this.config.closeLauncherOnLaunch;
     this.showGameLog = this.config.showGameLog;
+    this.locale = this.config.language;
+    this.proxy = this.config.proxy;
+    this.isolationType = this.config.isolationType;
   }
 
   saveConfig(): void {
@@ -42,8 +51,33 @@ export default struct SettingsPage {
       downloadSource: this.downloadSource === 'mojang' ? DownloadSource.MOJANG : this.downloadSource === 'mcbbs' ? DownloadSource.MCBBS : DownloadSource.BMCLAPI,
       downloadThreads: this.downloadThreads,
       closeLauncherOnLaunch: this.closeOnLaunch,
-      showGameLog: this.showGameLog
+      showGameLog: this.showGameLog,
+      language: this.locale,
+      proxy: this.proxy,
+      isolationType: this.isolationType
     });
+    // 语言切了要立刻生效
+    I18n.setLocale(this.locale === 'en-US' ? 'en-US' : 'zh-CN');
+    // 下载相关设置改完同步给安装器与下载引擎
+    ModLoaderInstaller.getInstance().syncDownloadSettings();
+    DownloadSettings.sync();
+    this.showApplyNote = true;
+  }
+
+  @State showApplyNote: boolean = false;
+
+  private isolationTypeLabel(): string {
+    if (this.isolationType === 'always') {
+      return '总是隔离';
+    }
+    if (this.isolationType === 'never') {
+      return '从不隔离';
+    }
+    return '仅模组实例（默认）';
+  }
+
+  private currentDownloadSummary(): string {
+    return DownloadSettings.describe();
   }
 
   build() {
@@ -61,14 +95,37 @@ export default struct SettingsPage {
           SectionHeader({ title: 'Launcher' });
           Card() {
             Column() {
-              // Theme
-              this.SettingRow('Theme', '');
+              // 语言
+              this.SettingRow('语言 / Language', '');
               Row({ space: 8 }) {
-                this.ThemeOption('Light', 'light');
-                this.ThemeOption('Dark', 'dark');
-                this.ThemeOption('System', 'system');
+                this.LocaleOption('简体中文', 'zh-CN');
+                this.LocaleOption('English', 'en-US');
               }
               .width('100%')
+
+              // 主题
+              this.SettingRow('主题 / Theme', '');
+              Row({ space: 8 }) {
+                this.ThemeOption('浅色', 'light');
+                this.ThemeOption('深色', 'dark');
+                this.ThemeOption('跟随系统', 'system');
+              }
+              .width('100%')
+
+              // 版本隔离
+              this.SettingRow('版本隔离 / Version Isolation', this.isolationTypeLabel());
+              Row({ space: 8 }) {
+                this.IsolationOption('总是隔离', 'always');
+                this.IsolationOption('仅模组实例', 'modded');
+                this.IsolationOption('从不隔离', 'never');
+              }
+              .width('100%')
+              Text('「仅模组实例」= HMCL 默认：装了 Forge/Fabric 的实例独立目录，原版共享，' +
+                '避免原版重复占几 GB。切换后对之后新建的实例生效。')
+                .fontSize(10)
+                .fontColor('#888888')
+                .width('100%')
+                .margin({ top: 4 })
               .margin({ top: 8 });
 
               Divider().height(1).color('#E0E0E0').margin({ top: 12, bottom: 12 });
@@ -268,6 +325,35 @@ export default struct SettingsPage {
     }
     .width('100%')
     .padding({ top: 4, bottom: 4 });
+  }
+
+  @Builder
+  @Builder
+  LocaleOption(label: string, code: string) {
+    Text(label)
+      .fontSize(13)
+      .fontColor(this.locale === code ? Color.White : '#666666')
+      .backgroundColor(this.locale === code ? '#5C6BC0' : '#E8E8E8')
+      .borderRadius(6)
+      .padding({ left: 16, right: 16, top: 6, bottom: 6 })
+      .onClick(() => {
+        this.locale = code;
+        this.saveConfig();
+      });
+  }
+
+  @Builder
+  IsolationOption(label: string, type: string) {
+    Text(label)
+      .fontSize(13)
+      .fontColor(this.isolationType === type ? Color.White : '#666666')
+      .backgroundColor(this.isolationType === type ? '#5C6BC0' : '#E8E8E8')
+      .borderRadius(6)
+      .padding({ left: 16, right: 16, top: 6, bottom: 6 })
+      .onClick(() => {
+        this.isolationType = type;
+        this.saveConfig();
+      });
   }
 
   @Builder
