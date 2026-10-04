@@ -26,13 +26,29 @@ export interface JdkInfo {
   /** 是否可删除 */
   removable: boolean;
   /**
-   * 是不是完整 JDK。
-   * 只有 bin/（含 java 可执行文件）才能启动 Minecraft；
-   * 只有 lib/ 的其实是 JRE（运行时），跑不了游戏。
-   * 实测内置的 jdk17 / jdk21 就是这种情况，必须在界面上说清楚，
-   * 否则用户会以为「装了 Java 17 却起不来」。
+   * 是否具备启动 Minecraft 的条件。
+   *
+   * ⚠️ 这里踩过一个坑，值得写清楚：
+   * 我原来用「有没有 bin/java 可执行文件」判定，把内置 jdk17 / jdk21
+   * 判成了「仅 JRE，不可启动游戏」。这是错的。
+   *
+   * 实际情况（核对 mc-ohos-resources 发布的 zip 后）：
+   *   jdk17-ohos-full-v5.zip → 72 个条目，顶层只有 conf / lib / release
+   *   jdk21-ohos-full-v7.zip → 82 个条目，同样
+   *   jdk8-ohos-full-v4.zip  → 126 个条目，顶层 jre/，含 jre/bin/java
+   *
+   * 但前两者内部其实很完整：
+   *   lib/modules（122~134 MB，JVM 的全部核心类）
+   *   lib/server/libjvm.so（22~24 MB，JVM 本体）
+   *   lib/libjava.so / libjava.so 等原生库
+   * 也就是说「运行时」是全的，只是没带 bin/java 这个启动器程序。
+   * 在 ARM + 鸿蒙上，启动器本来就要由我们的 native 层
+   * dlopen libjvm.so 并自己调 JNI_CreateJavaVM（见 cpp/java_tool.cpp），
+   * 本来就不依赖 bin/java。
+   *
+   * 所以判定标准改为：有没有 lib/modules 或 libjvm.so。
    */
-  fullJdk: boolean;
+  usable: boolean;
 }
 
 /** Minecraft 版本 → 所需 Java 主版本 */
@@ -88,21 +104,42 @@ export class JavaManager {
     return `需要 Java ${major}`;
   }
 
-  /** 从 bin/java 或 release 文件里读主版本号 */
+  /**
+   * 读主版本号。
+   * 优先看 release 文件（里面写 JAVA_VERSION="17.0.13"），
+   * 读不到再从目录名兜底（jdk17 / jdk-21 / java-8）。
+   */
   static probeMajor(jdkPath: string): number {
-    // 优先看 release（里面写 JAVA_VERSION="17.0.13"）
     const release = `${jdkPath}/release`;
     if (FileUtils.exists(release)) {
-      const text = FileUtils.readFile(release);
-      const m = /JAVA_VERSION="([^"]+)"/.exec(text);
-      if (m !== null && m.length > 1) {
-        const major = parseInt(m[1].split(/[._\-]/)[0], 10);
-        if (!isNaN(major)) {
-          return major;
+      try {
+        const text = FileUtils.readFile(release);
+        const m = /JAVA_VERSION="([^"]+)"/.exec(text);
+        if (m !== null && m.length > 1) {
+          const major = parseInt(m[1].split(/[._\-]/)[0], 10);
+          if (!isNaN(major)) {
+            return major;
+          }
         }
+      } catch (e) {
+        // release 读不到就退化到目录名
       }
     }
-    // 目录名兜底：jdk17 / jdk-21 / java-8
+    // jdk8 的结构是 jdk8/jre/release
+    const nested = `${jdkPath}/jre/release`;
+    if (FileUtils.exists(nested)) {
+      try {
+        const text = FileUtils.readFile(nested);
+        const m = /JAVA_VERSION="([^"]+)"/.exec(text);
+        if (m !== null && m.length > 1) {
+          const major = parseInt(m[1].split(/[._\-]/)[0], 10);
+          if (!isNaN(major)) {
+            return major;
+          }
+        }
+      } catch (e) {
+      }
+    }
     const name = jdkPath.substring(jdkPath.lastIndexOf('/') + 1);
     const dm = /(\d+)/.exec(name);
     if (dm !== null) {
@@ -131,12 +168,19 @@ export class JavaManager {
       if (!FileUtils.isDirectory(full)) {
         continue;
       }
-      // 至少要有 lib/ 或 bin/ 才算是 Java 运行时目录。
-      // 注意：只有 lib/ 而没有 bin/ 的是 JRE，启动 Minecraft 需要 bin/java，
-      // 所以这里不丢弃，只标记 fullJdk=false，让界面明确提示。
-      const hasBin = FileUtils.exists(`${full}/bin`);
-      const hasLib = FileUtils.exists(`${full}/lib`);
-      if (!hasBin && !hasLib) {
+      // 判定能否启动 Minecraft：需要 lib/modules（JVM 的全部核心类）
+      // 或 libjvm.so（JVM 本体）。不要求 bin/java ——
+      // 我们用 native dlopen libjvm.so + JNI_CreateJavaVM 启动（见 cpp/java_tool.cpp），
+      // 本来就不经过 java 可执行文件。
+      //
+      // ⚠️ libjvm.so 的位置各版本不同，必须逐个位置试：
+      //   jdk17/21: lib/server/libjvm.so、lib/libjvm.so
+      //   jdk8:     lib/<arch>/server/libjvm.so（带架构目录层级），
+      //            可能是 jdk8/lib/... 也可能是 jdk8/jre/lib/...
+      const hasModules = FileUtils.exists(`${full}/lib/modules`);
+      const hasJvm = JavaManager.hasLibJvm(full);
+      const hasLib = FileUtils.exists(`${full}/lib`) || FileUtils.exists(`${full}/jre/lib`);
+      if (!hasModules && !hasJvm && !hasLib) {
         continue;
       }
       out.push({
@@ -145,7 +189,7 @@ export class JavaManager {
         majorVersion: JavaManager.probeMajor(full),
         bundled: JavaManager.BUNDLED.indexOf(dir) >= 0,
         removable: JavaManager.BUNDLED.indexOf(dir) < 0,
-        fullJdk: hasBin
+        usable: hasModules || hasJvm
       });
     }
     out.sort((a: JdkInfo, b: JdkInfo) => b.majorVersion - a.majorVersion);
@@ -156,6 +200,66 @@ export class JavaManager {
   static readonly BUNDLED: string[] = ['jdk8', 'jdk17', 'jdk21'];
 
   /**
+   * libjvm.so 在各版本里的位置不统一，逐个探测：
+   *   jdk17/21 → lib/server/libjvm.so 或 lib/libjvm.so
+   *   jdk8     → lib/aarch64/server/libjvm.so、lib/<arch>/server/libjvm.so
+   *              （且可能在 jdk8/lib 下，也可能在 jdk8/jre/lib 下）
+   */
+  static hasLibJvm(jdkPath: string): boolean {
+    const candidates: string[] = [
+      `${jdkPath}/lib/server/libjvm.so`,
+      `${jdkPath}/lib/libjvm.so`,
+      `${jdkPath}/jre/lib/server/libjvm.so`,
+      `${jdkPath}/jre/lib/aarch64/server/libjvm.so`,
+      `${jdkPath}/jre/lib/arm64-v8a/server/libjvm.so`,
+      `${jdkPath}/lib/aarch64/server/libjvm.so`,
+      `${jdkPath}/lib/arm64-v8a/server/libjvm.so`
+    ];
+    for (const c of candidates) {
+      if (FileUtils.exists(c)) {
+        return true;
+      }
+    }
+    // 再兜底扫一层架构目录（未来可能有别的架构）
+    for (const arch of ['aarch64', 'arm64-v8a', 'x86_64']) {
+      if (FileUtils.exists(`${jdkPath}/lib/${arch}/server/libjvm.so`) ||
+        FileUtils.exists(`${jdkPath}/jre/lib/${arch}/server/libjvm.so`)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** 定位 libjvm.so 的实际路径（启动时 dlopen 要用） */
+  static findLibJvm(jdkPath: string): string {
+    const candidates: string[] = [
+      `${jdkPath}/lib/server/libjvm.so`,
+      `${jdkPath}/lib/libjvm.so`,
+      `${jdkPath}/jre/lib/server/libjvm.so`,
+      `${jdkPath}/jre/lib/aarch64/server/libjvm.so`,
+      `${jdkPath}/jre/lib/arm64-v8a/server/libjvm.so`,
+      `${jdkPath}/lib/aarch64/server/libjvm.so`,
+      `${jdkPath}/lib/arm64-v8a/server/libjvm.so`
+    ];
+    for (const c of candidates) {
+      if (FileUtils.exists(c)) {
+        return c;
+      }
+    }
+    for (const arch of ['aarch64', 'arm64-v8a', 'x86_64']) {
+      const a = `${jdkPath}/lib/${arch}/server/libjvm.so`;
+      const b = `${jdkPath}/jre/lib/${arch}/server/libjvm.so`;
+      if (FileUtils.exists(a)) {
+        return a;
+      }
+      if (FileUtils.exists(b)) {
+        return b;
+      }
+    }
+    return '';
+  }
+
+  /**
    * 为某个 MC 版本挑选最合适的 JDK。
    * 优先精确匹配所需主版本；其次向上兼容（高版本 JDK 能跑老 MC，但 8 不能跑 17+ 的游戏）。
    */
@@ -163,16 +267,16 @@ export class JavaManager {
     if (jdks.length === 0) {
       return null;
     }
-    // ⚠️ 只考虑完整 JDK：JRE 没有 bin/java，启动不了 Minecraft。
+    // 只考虑可用（有 lib/modules 或 libjvm.so）的运行时
     const usable: JdkInfo[] = [];
     for (const j of jdks) {
-      if (j.fullJdk) {
+      if (j.usable) {
         usable.push(j);
       }
     }
     if (usable.length === 0) {
-      const msg = '没有可用的完整 JDK（现有 ' + jdks.length +
-        ' 个目录都不是完整 JDK），Minecraft 需要带 bin/java 的 JDK';
+      const msg = '没有可用的 Java 运行时（现有 ' + jdks.length +
+        ' 个目录都缺少 lib/modules 或 libjvm.so）';
       Logger.warn(JavaManager.TAG, msg);
       return null;
     }
@@ -200,9 +304,16 @@ export class JavaManager {
     return null;
   }
 
-  /** java 可执行文件路径（鸿蒙上 java 也可能是脚本） */
+  /**
+   * java 可执行文件路径。
+   * 仅用于展示/兜底 —— 实际启动走 native dlopen libjvm.so。
+   */
   static javaBin(jdkPath: string): string {
-    return `${jdkPath}/bin/java`;
+    const direct = `${jdkPath}/bin/java`;
+    if (FileUtils.exists(direct)) {
+      return direct;
+    }
+    return `${jdkPath}/jre/bin/java`;
   }
 
   /** JVM 主类入口（鸿蒙 OpenJDK 发行版仍是 java.lang） */

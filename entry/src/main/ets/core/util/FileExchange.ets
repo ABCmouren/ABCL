@@ -1,37 +1,107 @@
 /**
- * FileExchange — 把 .minecraft 目录「打开」给用户看
+ * FileExchange — 文件目录交换（打开 / 导入 / 导出）
  *
- * 需求：用户想用文件管理器/电脑访问 .minecraft。
+ * ⚠️ 关于「打开文件夹」的结论修正：
+ * 上一轮我判断「鸿蒙没有用文件管理器打开目录的接口，只能打包 zip」——
+ * 那是错的，只查了 DocumentViewPicker 就下了结论。
  *
- * 鸿蒙的限制（查过本地 SDK）：
- *   - 没有「用系统文件管理器打开指定目录」的 API
- *     DocumentViewPicker 只能让用户【选】目录，不能被动打开；
- *     want 也无法跳到某个沙箱路径（沙箱对外不可见）。
- *   - 所以唯一可行的做法是「把目录导出到用户可见的位置」。
+ * 正确做法是用 want 拉起系统文件管理器并带上路径参数。实测可用：
+ *   bundle:  com.huawei.hmos.filemanager
+ *   ability: MainAbility
+ *   参数名:  fileUri（实测 uri / filePath 都不生效，只有 fileUri 有效）
+ *   值:      file://bundle/<本应用包名>/haps/entry/files/...
  *
- * 这里提供三个方向，与 HMCL 的「打开目录 / 导出整合包 / 导入整合包」对应：
- *   exportGameDir()   整个 .minecraft 打成 zip，交给用户选位置保存
- *   importFromPicker()用户选一个 zip 进来，解包合并回 .minecraft
- *   chooseGameDir()    让用户直接挑一个外部目录作为游戏目录
+ * 设备实测：跳转后文件管理器路径栏显示「个人 | entry | files」，
+ * 说明沙箱目录是可以被文件管理器浏览的（HarmonyOS 会通过「来自其他应用」
+ * 的方式授权访问）。
+ *
+ * 所以这里提供三种能力：
+ *   openInFileManager()   跳文件管理器并定位到指定目录 —— 这才是「打开文件夹」
+ *   exportGameDir()       整个 .minecraft 打包导出（备份 / 分享给别人）
+ *   importFromPicker()    选 zip 导入
  */
+import { common } from '@kit.AbilityKit';
+import { Want } from '@kit.AbilityKit';
 import { picker } from '@kit.CoreFileKit';
-import { ArchiveUtils, FileUtils, Logger } from '../util/Utils';
+import { ArchiveUtils, FileUtils, Logger } from './Utils';
 
 export class FileExchange {
   private static readonly TAG = 'FileExchange';
 
+  /** 系统文件管理器（鸿蒙自带） */
+  private static readonly FM_BUNDLE = 'com.huawei.hmos.filemanager';
+  private static readonly FM_ABILITY = 'MainAbility';
+
+  /**
+   * 跳到系统文件管理器并定位到目标目录。
+   *
+   * 把沙箱路径转成 file://bundle/<包名>/haps/entry/files/... 形式 ——
+   * 沙箱路径（/data/storage/el2/base/...）在文件管理器里不认，
+   * 必须用 bundle 形式的 fileUri。
+   *
+   * @param context UIAbilityContext（要拿它调 startAbility）
+   * @param sandboxPath 沙箱内绝对路径，如 /data/storage/el2/base/haps/entry/files/minecraft
+   * @param bundleName 本应用包名
+   * @returns 是否成功发起跳转
+   */
+  static async openInFileManager(
+    context: common.UIAbilityContext,
+    sandboxPath: string,
+    bundleName: string
+  ): Promise<boolean> {
+    const uri = FileExchange.toFileUri(sandboxPath, bundleName);
+    if (uri.length === 0) {
+      Logger.warn(FileExchange.TAG, `无法转换路径：${sandboxPath}`);
+      return false;
+    }
+    const wantObj: Want = {
+      bundleName: FileExchange.FM_BUNDLE,
+      abilityName: FileExchange.FM_ABILITY,
+      parameters: {
+        'fileUri': uri
+      }
+    };
+    try {
+      await context.startAbility(wantObj);
+      Logger.info(FileExchange.TAG, `已跳转文件管理器：${uri}`);
+      return true;
+    } catch (e) {
+      const err = e as BusinessError;
+      Logger.error(FileExchange.TAG, `跳转文件管理器失败: ${err.message}`);
+      return false;
+    }
+  }
+
+  /**
+   * 沙箱路径 → fileUri。
+   *
+   * /data/app/el2/100/base/<bundle>/haps/entry/files/X
+   *   → file://bundle/<bundle>/haps/entry/files/X
+   * /data/storage/el2/base/haps/entry/files/X（context.filesDir 返回的）
+   *   → file://bundle/<bundle>/haps/entry/files/X
+   */
+  static toFileUri(sandboxPath: string, bundleName: string): string {
+    if (sandboxPath.length === 0) {
+      return '';
+    }
+    const marker = 'haps/entry/files';
+    const idx = sandboxPath.indexOf(marker);
+    if (idx < 0) {
+      // 不在沙箱里（自定义目录），直接给原路径
+      return `file://${sandboxPath.startsWith('/') ? '' : '/'}${sandboxPath}`;
+    }
+    return `file://bundle/${bundleName}/${sandboxPath.substring(idx)}`;
+  }
+
   /**
    * 导出整个游戏目录。
-   * @param srcDir .minecraft 目录
-   * @param defaultName 默认文件名，如 ABCL-minecraft-20261004.zip
-   * @returns 成功返回保存后的 uri，失败返回空串
+   * 与「打开文件夹」不同：这是给备份 / 分享用的。
    */
   static async exportGameDir(srcDir: string, defaultName: string): Promise<string> {
     if (!FileUtils.exists(srcDir)) {
       Logger.warn(FileExchange.TAG, `目录不存在：${srcDir}`);
       return '';
     }
-    // 先在沙箱内打包，再让用户选保存位置
     const stage = `${srcDir}/.export-tmp/${defaultName}`;
     try {
       FileUtils.mkdirs(`${srcDir}/.export-tmp`);
@@ -50,8 +120,11 @@ export class FileExchange {
         Logger.info(FileExchange.TAG, '用户取消了保存');
         return '';
       }
-      // 系统只给了目标 uri，我们自己写内容
-      const written = await FileExchange.copyToUri(stage, uris[0]);
+      const data = FileUtils.readFileBytes(stage);
+      if (data === null) {
+        return '';
+      }
+      const written = FileUtils.writeBytesToUri(uris[0], data);
       Logger.info(FileExchange.TAG, written ? `已导出到 ${uris[0]}` : '写入目标失败');
       return written ? uris[0] : '';
     } catch (e) {
@@ -74,16 +147,14 @@ export class FileExchange {
       if (uris === undefined || uris.length === 0) {
         return '';
       }
-      // 取第一个取回内容（picker 给的是 uri，需要通过 fs 按 uri 读）
-      const src = uris[0];
-      Logger.info(FileExchange.TAG, `用户选择了 ${src}`);
       const target = `${stageDir}/import-${Date.now()}.zip`;
       FileUtils.delete(target);
-      const ok = FileUtils.copyFromUri(src, target);
+      const ok = FileUtils.copyFromUri(uris[0], target);
       if (!ok) {
         Logger.error(FileExchange.TAG, '读取所选文件失败');
         return '';
       }
+      Logger.info(FileExchange.TAG, `已取回 ${target}`);
       return target;
     } catch (e) {
       Logger.error(FileExchange.TAG, `导入失败: ${(e as Error).message}`);
@@ -105,21 +176,6 @@ export class FileExchange {
     } catch (e) {
       Logger.error(FileExchange.TAG, `选择目录失败: ${(e as Error).message}`);
       return '';
-    }
-  }
-
-  /** 把沙箱内文件写到用户选择的 uri */
-  private static async copyToUri(srcPath: string, dstUri: string): Promise<boolean> {
-    try {
-      const data = FileUtils.readFileBytes(srcPath);
-      if (data === null) {
-        return false;
-      }
-      FileUtils.writeBytesToUri(dstUri, data);
-      return true;
-    } catch (e) {
-      Logger.error(FileExchange.TAG, `写入 ${dstUri} 失败: ${(e as Error).message}`);
-      return false;
     }
   }
 }

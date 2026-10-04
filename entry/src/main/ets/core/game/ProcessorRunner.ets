@@ -66,6 +66,29 @@ export class ProcessorRunner {
     return bridge;
   }
 
+  /**
+   * 跑一个任意 main class 的 Java 程序（OptiFine 的 optifine.Patcher 用）。
+   * @return 退出码，0 表示成功
+   */
+  static async runJava(
+    javaHome: string,
+    classpath: string,
+    mainClass: string,
+    args: string[],
+    workDir: string,
+    logFile: string
+  ): Promise<number> {
+    const bridge = ProcessorRunner.bridge();
+    FileUtils.mkdirs(ProcessorRunner.dirOf(logFile));
+    return bridge.runJavaProcessor(javaHome, classpath, mainClass, args, workDir, logFile, 2048);
+  }
+
+  /** 取文件所在目录 */
+  private static dirOf(path: string): string {
+    const idx = path.lastIndexOf('/');
+    return idx > 0 ? path.substring(0, idx) : '.';
+  }
+
   static async runAll(processors: ForgeProcessor[], ctx: ProcessorContext): Promise<void> {
     const bridge = ProcessorRunner.bridge();
     const javaHome = ProcessorRunner.resolveJavaHome(ctx.mcVersion);

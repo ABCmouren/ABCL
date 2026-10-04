@@ -241,8 +241,8 @@ export default struct JavaPage {
               .padding({ left: 6, right: 6, top: 1, bottom: 1 })
               .margin({ left: 8 });
           }
-          if (!jdk.fullJdk) {
-            Text('仅 JRE，不可启动游戏')
+          if (!jdk.usable) {
+            Text('缺少 JVM 本体，不可用')
               .fontSize(10)
               .fontColor(HmclTheme.ON_ERROR_CONTAINER)
               .backgroundColor(HmclTheme.ERROR_CONTAINER)
@@ -262,10 +262,9 @@ export default struct JavaPage {
         }
         .width('100%');
 
-        Text(`Java ${jdk.majorVersion > 0 ? jdk.majorVersion : '?'} · ${this.compatibleLabel(jdk)}` +
-          (jdk.fullJdk ? '' : ' · 缺少 bin/java'))
+        Text(`Java ${jdk.majorVersion > 0 ? jdk.majorVersion : '?'} · ${this.compatibleLabel(jdk)}`)
           .fontSize(11)
-          .fontColor(jdk.fullJdk ? HmclTheme.ON_SURFACE_VARIANT : HmclTheme.ERROR)
+          .fontColor(jdk.usable ? HmclTheme.ON_SURFACE_VARIANT : HmclTheme.ERROR)
           .width('100%')
           .margin({ top: 3 });
 
@@ -280,7 +279,7 @@ export default struct JavaPage {
       }
       .layoutWeight(1);
 
-      if (!this.isDefault(jdk) && jdk.fullJdk) {
+      if (!this.isDefault(jdk) && jdk.usable) {
         Text('设为默认')
           .fontSize(12)
           .fontColor(HmclTheme.PRIMARY)

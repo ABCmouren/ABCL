@@ -71,6 +71,8 @@ export class Mirrors {
   //  https://github.com/mcmod-info-mirror/mcim-rust-api
   // ============================================================
   static readonly MCIMIRROR_ORIGIN = 'https://mod.mcimirror.top';
+  /** mcimirror 也镜像了 OptiFine 版本列表（/optifine/<mcVersion>） */
+  static readonly MODRINTH_ORIGIN = 'https://mod.mcimirror.top/modrinth';
   static readonly MODRINTH_OFFICIAL = 'https://api.modrinth.com/v2';
   static readonly MODRINTH_MIRROR = 'https://mod.mcimirror.top/modrinth/v2';
   static readonly CURSEFORGE_OFFICIAL = 'https://api.curseforge.com/v1';

@@ -18,6 +18,7 @@ import { HmclTheme } from '../../theme/HmclTheme';
 import { ArchiveUtils, FileUtils, Logger } from '../../core/util/Utils';
 import { FileExchange } from '../../core/util/FileExchange';
 import { InstanceManager } from '../../core/game/InstanceManager';
+import { common } from '@kit.AbilityKit';
 import { EmptyView, LoadingView } from '../../components/common/CommonComponents';
 
 @Component
@@ -65,6 +66,25 @@ export default struct GameDirPage {
   @State measuring: boolean = false;
 
   @State exporting: boolean = false;
+  @State bundleName: string = 'com.abcmouren.abcl';
+  private context: common.UIAbilityContext = getContext(this) as common.UIAbilityContext;
+
+  /**
+   * 打开 .minecraft 文件夹：拉起系统文件管理器并定位过去。
+   * 用 want + fileUri（file://bundle/<包名>/haps/entry/files/...），
+   * 沙箱目录会以「来自其他应用」的方式授权访问。
+   */
+  private async openInFileManager(): Promise<void> {
+    this.exporting = true;
+    this.error = '';
+    const ok = await FileExchange.openInFileManager(this.context, this.mcDir(), this.bundleName);
+    this.exporting = false;
+    if (!ok) {
+      this.error = '无法打开文件管理器（设备可能未安装）。可用「导出备份」把目录导出来。';
+    } else {
+      this.message = '已在文件管理器中打开 ' + this.mcDir();
+    }
+  }
 
   /** 导出整个 .minecraft 目录到用户可见位置 */
   private async exportDir(): Promise<void> {
@@ -209,7 +229,7 @@ export default struct GameDirPage {
         .margin({ top: 8 });
 
       Row() {
-        Button(this.exporting ? '正在打包…' : '打开 .minecraft 文件夹')
+        Button(this.exporting ? '正在跳转…' : '打开 .minecraft 文件夹')
           .layoutWeight(1)
           .height(34)
           .fontSize(12)
@@ -217,6 +237,17 @@ export default struct GameDirPage {
           .backgroundColor(HmclTheme.PRIMARY_CONTAINER)
           .borderRadius(8)
           .enabled(!this.exporting)
+          .onClick(() => {
+            void this.openInFileManager();
+          });
+        Button(this.exporting ? '打包中…' : '导出备份')
+          .layoutWeight(1)
+          .height(34)
+          .fontSize(12)
+          .fontColor(HmclTheme.ON_SECONDARY_CONTAINER)
+          .backgroundColor(HmclTheme.SECONDARY_CONTAINER)
+          .borderRadius(8)
+          .margin({ left: 8 })
           .onClick(() => {
             void this.exportDir();
           });
@@ -261,9 +292,9 @@ export default struct GameDirPage {
       .width('100%')
       .margin({ top: 8 });
 
-      Text('鸿蒙没有「用文件管理器打开目录」的接口，沙箱路径对外也不可见，' +
-        '所以「打开」的实现是：把整个目录打包成 zip，再让你存到手机/电脑能访问的位置；' +
-        '「导入」反过来，可以把外部的 .minecraft 备份拷回来。')
+      Text('「打开」会把系统文件管理器拉起来并定位到这个目录（通过 file://bundle/… 的' +
+        '授权形式，沙箱目录可以浏览）。「导出备份」是把整个目录打包成 zip 存到别处，' +
+        '用于备份或分享；「导入」则把外部的 .minecraft 备份拷回来。')
         .fontSize(10)
         .fontColor(HmclTheme.OUTLINE)
         .width('100%')

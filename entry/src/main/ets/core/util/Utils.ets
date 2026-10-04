@@ -402,6 +402,28 @@ export class ArchiveUtils {
   }
 
   /**
+   * 读取包内二进制条目并落地为文件（OptiFine 取 launchwrapper 用）。
+   * 返回落地路径，不存在则返回空串。
+   */
+  static async readBinaryEntry(zipPath: string, entryName: string, destPath: string): Promise<string> {
+    const tmp = destPath + '.x';
+    FileUtils.delete(tmp);
+    const ok = await ArchiveUtils.unzip(zipPath, tmp);
+    if (!ok) {
+      return '';
+    }
+    const src = `${tmp}/${entryName}`;
+    if (!FileUtils.exists(src)) {
+      FileUtils.delete(tmp);
+      return '';
+    }
+    FileUtils.mkdirs(FileUtils.getDirName(destPath));
+    FileUtils.copyFile(src, destPath);
+    FileUtils.delete(tmp);
+    return destPath;
+  }
+
+  /**
    * 读取包内单个文本条目（做法：整体解压到临时目录再读）。
    * @param zipPath 压缩包路径
    * @param entryName 包内路径，允许带或不带前导 '/'

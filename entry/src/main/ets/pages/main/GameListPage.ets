@@ -14,6 +14,10 @@ import { ModLoaderInstaller, ModLoader, LoaderVersion } from '../../core/game/Mo
 import { LaunchEngine } from '../../core/launch/LaunchEngine';
 import { InstanceManager } from '../../core/game/InstanceManager';
 import { GameDirectoryResolver } from '../../core/game/GameDirectoryResolver';
+import { OptiFineInstaller, OptiFineRemoteVersion } from '../../core/game/OptiFineInstaller';
+import { JavaManager } from '../../core/launch/JavaManager';
+import { ProcessorRunner } from '../../core/game/ProcessorRunner';
+import { Constants } from '../../config/Constants';
 import { Account } from '../../model/Account';
 import { Logger, StringUtils } from '../../core/util/Utils';
 import { HmclTheme } from '../../theme/HmclTheme';
@@ -495,6 +499,61 @@ export default struct GameListPage {
     this.toastText = path.length > 0 ? '已导出到 ' + path : '导出失败';
   }
 
+  // ============================================================
+  //  OptiFine 安装
+  // ============================================================
+  @State ofVersions: OptiFineRemoteVersion[] = [];
+  @State showOptiFinePicker: boolean = false;
+  @State ofTarget: GameInstallation | null = null;
+  @State ofBusy: boolean = false;
+
+  private async openOptiFine(inst: GameInstallation): Promise<void> {
+    this.ofTarget = inst;
+    this.ofVersions = [];
+    this.ofBusy = true;
+    const list = await OptiFineInstaller.fetchVersions(inst.gameVersion);
+    this.ofVersions = list;
+    this.ofBusy = false;
+    this.showOptiFinePicker = true;
+    if (list.length === 0) {
+      this.toastText = '没有找到 OptiFine ' + inst.gameVersion + ' 的版本';
+    }
+  }
+
+  private async installOptiFine(remote: OptiFineRemoteVersion): Promise<void> {
+    if (this.ofTarget === null) {
+      return;
+    }
+    this.ofBusy = true;
+    this.showOptiFinePicker = false;
+    this.toastText = '正在安装 OptiFine ' + remote.selfVersion + '…';
+    // Patcher 要跑 java：按 MC 版本挑 JDK，再走 native 通道
+    const jdks = JavaManager.scan(JavaManager.root(Constants.appDir));
+    const jdk = JavaManager.pickFor(jdks, remote.gameVersion);
+    if (jdk === null) {
+      this.toastText = '没有可用的 Java 运行时';
+      this.ofBusy = false;
+      return;
+    }
+    try {
+      const patched = await OptiFineInstaller.install(this.ofTarget, remote,
+        async (installerJar: string, vanillaJar: string, outputJar: string) => {
+          const logFile = Constants.appDir + '/logs/optifine-patcher.log';
+          const code = await ProcessorRunner.runJava(
+            jdk.path, installerJar, 'optifine.Patcher',
+            [vanillaJar, installerJar, outputJar], Constants.appDir, logFile);
+          return code === 0;
+        });
+      this.store.addInstallation(patched);
+      this.toastText = 'OptiFine ' + remote.selfVersion + ' 安装完成';
+      this.loadGames();
+    } catch (e) {
+      this.toastText = 'OptiFine 安装失败：' + (e as Error).message;
+      Logger.error('GameListPage', 'OptiFine 安装失败', e as Error);
+    }
+    this.ofBusy = false;
+  }
+
   private async deleteInstance(inst: GameInstallation): Promise<void> {
     this.toastText = '正在删除实例…';
     const ok = await InstanceManager.remove(inst);
@@ -541,6 +600,13 @@ export default struct GameListPage {
         this.menuVisible = false;
         if (this.menuInstance) {
           this.openLoaderPanel(this.menuInstance, ModLoader.NEO_FORGE);
+        }
+      });
+
+      this.MenuItem('安装 OptiFine', HmclTheme.ON_SURFACE, () => {
+        this.menuVisible = false;
+        if (this.menuInstance) {
+          void this.openOptiFine(this.menuInstance);
         }
       });
 
