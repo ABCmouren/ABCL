@@ -118,9 +118,16 @@ export interface ForgeLegacyInstall {
   version?: string;
 }
 
-export interface FabricMetaVersion {
+/** Fabric v2 / Quilt v3 的 loader 列表项：版本信息嵌在 loader 子对象里 */
+export interface FabricMetaLoaderInfo {
   version: string;
-  stable: boolean;
+  stable?: boolean;
+  maven?: string;
+  build?: number;
+}
+
+export interface FabricMetaVersion {
+  loader: FabricMetaLoaderInfo;
 }
 
 export class ModLoaderInstaller {
@@ -531,14 +538,21 @@ export class ModLoaderInstaller {
     }
     const list: LoaderVersion[] = [];
     for (const entry of res.data) {
+      // 注意：Fabric v2 / Quilt v3 的列表项形如 [{ loader: { version, stable } }]，
+      // 直接读 entry.version 会永远拿到 undefined（旧代码就是这么坏的）。
+      const info = entry.loader;
+      if (!info || !info.version) {
+        continue;
+      }
+      const version = info.version;
       list.push({
         loader: loader,
-        version: entry.version,
+        version: version,
         mcVersion: mcVersion,
         fullVersionId: loader === ModLoader.QUILT
-          ? `${mcVersion}-quilt-${entry.version}`
-          : `fabric-loader-${entry.version}-${mcVersion}`,
-        stable: entry.stable === true
+          ? `${mcVersion}-quilt-${version}`
+          : `fabric-loader-${version}-${mcVersion}`,
+        stable: info.stable === true
       });
     }
     return list;
