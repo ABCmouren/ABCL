@@ -19,6 +19,7 @@ import { Constants } from '../../config/Constants';
 import { HttpClient } from '../network/HttpClient';
 import { Mirrors } from '../network/Mirrors';
 import { DownloadEngine, DownloadItem, CancelToken } from '../download/DownloadEngine';
+import { DownloadSettings } from '../download/DownloadSettings';
 import { ArchiveUtils, FileUtils, Logger, StringUtils } from '../util/Utils';
 
 export interface InstallProgress {
@@ -269,7 +270,7 @@ export class VersionInstaller {
           speedBps: stats.speedBps
         });
       },
-      Constants.DOWNLOAD_CONCURRENCY,
+      DownloadSettings.threads(),
       opts.token
     );
 
@@ -365,7 +366,8 @@ export class VersionInstaller {
           speedBps: stats.speedBps
         });
       },
-      Constants.ASSET_CONCURRENCY,
+      // 资源文件多且小，用设置里的并发（上限 12，避免请求过密被限流）
+      Math.min(DownloadSettings.threads(), 12),
       opts.token
     );
 

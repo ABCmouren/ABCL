@@ -20,6 +20,7 @@ import { Constants } from '../../config/Constants';
 import { HttpClient } from '../network/HttpClient';
 import { Mirrors } from '../network/Mirrors';
 import { DownloadEngine, DownloadItem, CancelToken } from '../download/DownloadEngine';
+import { DownloadSettings } from '../download/DownloadSettings';
 import { ArchiveUtils, FileUtils, Logger } from '../util/Utils';
 import { VersionInstaller } from './VersionInstaller';
 import { ProcessorRunner } from './ProcessorRunner';
@@ -134,6 +135,12 @@ export class ModLoaderInstaller {
   private static readonly TAG = 'ModLoaderInstaller';
   private static instance: ModLoaderInstaller;
   private baseDir: string = '';
+  /**
+   * 是否走 BMCLAPI 镜像。
+   * 原来两处直接写死 useMirror: true，导致设置里切到「Mojang 官方」
+   * 之后装 Forge/Fabric 依然走镜像 —— 设置形同虚设。
+   */
+  private useMirror: boolean = true;
 
   static getInstance(): ModLoaderInstaller {
     if (!ModLoaderInstaller.instance) {
@@ -144,7 +151,15 @@ export class ModLoaderInstaller {
 
   init(baseDir: string): void {
     this.baseDir = baseDir;
+    this.syncDownloadSettings();
     Logger.info(ModLoaderInstaller.TAG, `initialized, baseDir=${baseDir}`);
+  }
+
+  /** 从全局设置同步下载源与并发（设置页改完调用） */
+  syncDownloadSettings(): void {
+    this.useMirror = DownloadSettings.useMirror();
+    Logger.info(ModLoaderInstaller.TAG,
+      `下载源=${this.useMirror ? 'BMCLAPI 镜像' : 'Mojang 官方'} 并发=${DownloadSettings.threads()}`);
   }
 
   // ============================================================
@@ -466,7 +481,7 @@ export class ModLoaderInstaller {
       await VersionInstaller.install({
         mcDir: mcDir,
         versionId: mcVersion,
-        useMirror: true,
+        useMirror: this.useMirror,
         osArch: Constants.osArch,
         onProgress: (p) => {
           if (onProgress) {
@@ -613,7 +628,7 @@ export class ModLoaderInstaller {
       await VersionInstaller.install({
         mcDir: mcDir,
         versionId: mcVersion,
-        useMirror: true,
+        useMirror: this.useMirror,
         osArch: Constants.osArch,
         onProgress: (p) => {
           if (onProgress) {

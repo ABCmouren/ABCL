@@ -16,6 +16,8 @@ export interface LauncherConfig {
   language: string;
   downloadSource: DownloadSource;
   downloadThreads: number;
+  /** 代理，如 http://127.0.0.1:7890；空串表示不用 */
+  proxy: string;
 
   // Java settings
   javaPath: string;
@@ -44,6 +46,7 @@ export const DefaultConfig: LauncherConfig = {
   language: 'zh-CN',
   downloadSource: DownloadSource.BMCLAPI,
   downloadThreads: 4,
+  proxy: '',
   javaPath: '',
   minMemory: 1024,
   maxMemory: 4096,

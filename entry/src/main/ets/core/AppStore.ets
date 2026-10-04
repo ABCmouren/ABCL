@@ -113,6 +113,7 @@ export class AppStore {
       language: config.language !== undefined ? config.language : this.config.language,
       downloadSource: config.downloadSource !== undefined ? config.downloadSource : this.config.downloadSource,
       downloadThreads: config.downloadThreads !== undefined ? config.downloadThreads : this.config.downloadThreads,
+      proxy: config.proxy !== undefined ? config.proxy : this.config.proxy,
       javaPath: config.javaPath !== undefined ? config.javaPath : this.config.javaPath,
       minMemory: config.minMemory !== undefined ? config.minMemory : this.config.minMemory,
       maxMemory: config.maxMemory !== undefined ? config.maxMemory : this.config.maxMemory,

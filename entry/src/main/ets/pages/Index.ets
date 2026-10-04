@@ -15,6 +15,7 @@ import PackPage from './pack/PackPage';
 import WorldPage from './world/WorldPage';
 import ModpackPage from './modpack/ModpackPage';
 import GameDirPage from './gamedir/GameDirPage';
+import JavaPage from './java/JavaPage';
 import LogPage from './log/LogPage';
 import { HMCL_NAV, HmclTheme, NavEntry } from '../theme/HmclTheme';
 import { AppStore } from '../core/AppStore';
@@ -225,6 +226,8 @@ struct Index {
       ModpackPage()
     } else if (this.currentNav === 'gamedir') {
       GameDirPage()
+    } else if (this.currentNav === 'java') {
+      JavaPage()
     } else if (this.currentNav === 'logs') {
       LogPage()
     } else {

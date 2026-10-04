@@ -75,6 +75,7 @@ export const HMCL_NAV: NavEntry[] = [
   { key: 'worlds', label: '世界', glyph: '◍' },
   { key: 'modpacks', label: '整合包', glyph: '⛁' },
   { key: 'gamedir', label: '游戏目录', glyph: '🗀' },
+  { key: 'java', label: 'Java', glyph: '☕' },
   { key: 'logs', label: '日志', glyph: '☰' },
   { key: 'settings', label: '设置', glyph: '⚙' },
 ];
