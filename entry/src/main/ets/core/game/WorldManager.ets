@@ -3,11 +3,10 @@
  *
  * 对应 HMCL 的 WorldListPage / WorldManagePage：
  *   - 世界就是 <gameDir>/saves/<文件夹>（含 level.dat）
- *   - 支持删除、重命名、备份为 zip、查看大小与修改时间
+ *   - 支持删除、重命名、备份为 zip、查看大小与最后修改时间
  *
- * 说明：显示名优先取文件夹名。level.dat 是 gzip 压缩的 NBT，
- * 解析它需要独立的 NBT 读取器（后续补），当前先用文件夹名 + level.dat 的
- * 修改时间，这些都是磁盘上的真实信息，不是假数据。
+ * level.dat 是 gzip 压缩的 NBT，解析它需要独立的 NBT 读取器；
+ * 当前用文件夹名 + level.dat 的存在性与修改时间，这些都是磁盘上的真实信息。
  */
 import zlib from '@ohos.zlib';
 import { BusinessError } from '@ohos.base';
@@ -40,7 +39,7 @@ export class WorldManager {
   }
 
   static backupsDir(mcDir: string): string {
-    return `${mcDir}/backups`;
+    return `${mcDir}/${Constants.BACKUPS_DIR}`;
   }
 
   static scan(mcDir: string): InstalledWorld[] {
@@ -132,7 +131,7 @@ export class WorldManager {
     }
   }
 
-  /** 备份为 zip（@ohos.zlib.compressFile 支持目录） */
+  /** 备份为 zip（@ohos.zlib.compressFile 支持目录打包） */
   static async backup(mcDir: string, world: InstalledWorld): Promise<string> {
     const dir = WorldManager.backupsDir(mcDir);
     FileUtils.mkdirs(dir);
@@ -155,6 +154,42 @@ export class WorldManager {
       Logger.error(WorldManager.TAG, `备份失败: ${err.message}`);
       return '';
     }
+  }
+
+  /**
+   * 创建演示存档 —— 用来在没有 arm64 真机、无法真正进游戏的情况下
+   * 验证世界管理链路（扫描 / 统计 / 备份 / 重命名 / 删除）是否真的可用。
+   *
+   * 只在没有任何存档时写入，且带明显前缀，方便识别与清理。
+   */
+  static seedDemoWorlds(mcDir: string): number {
+    const dir = WorldManager.savesDir(mcDir);
+    if (FileUtils.exists(dir) && FileUtils.listDir(dir).length > 0) {
+      return 0;
+    }
+    let created = 0;
+    const samples: string[] = ['Demo_Survival', 'Demo_Adventure', 'Demo_NoLevelDat'];
+    for (const name of samples) {
+      const worldDir = `${dir}/${name}`;
+      try {
+        FileUtils.mkdirs(`${worldDir}/region`);
+        if (name !== 'Demo_NoLevelDat') {
+          FileUtils.writeFile(`${worldDir}/level.dat`, 'demo-level-data');
+          if (name === 'Demo_Survival') {
+            FileUtils.writeFile(`${worldDir}/icon.png`, 'demo-icon');
+          }
+        }
+        FileUtils.writeBytes(`${worldDir}/region/r.0.0.mca`, 64 * 1024, 7);
+        if (name === 'Demo_Adventure') {
+          FileUtils.writeBytes(`${worldDir}/region/r.0.1.mca`, 512 * 1024, 3);
+        }
+        created++;
+      } catch (e) {
+        Logger.warn(WorldManager.TAG, `创建演示存档 ${name} 失败: ${(e as Error).message}`);
+      }
+    }
+    Logger.info(WorldManager.TAG, `已创建 ${created} 个演示存档用于自检`);
+    return created;
   }
 
   private static timestamp(): string {

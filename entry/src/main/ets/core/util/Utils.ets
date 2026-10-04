@@ -84,6 +84,36 @@ export class FileUtils {
     }
   }
 
+  /**
+   * 写入指定大小的二进制文件（用循环写满，因为 fs.writeSync 对大 buffer 会短写）。
+   * 用途：造测试数据（如存档 region 文件）、校验磁盘写入完整性。
+   */
+  static writeBytes(path: string, size: number, fill: number = 0): void {
+    try {
+      const idx = path.lastIndexOf('/');
+      if (idx > 0) {
+        FileUtils.mkdirs(path.substring(0, idx));
+      }
+      const file = fs.openSync(path, fs.OpenMode.CREATE | fs.OpenMode.WRITE_ONLY | fs.OpenMode.TRUNC);
+      try {
+        const chunk = new ArrayBuffer(8192);
+        new Uint8Array(chunk).fill(fill & 0xff);
+        let written = 0;
+        while (written < size) {
+          const n = Math.min(chunk.byteLength, size - written);
+          const buf: ArrayBuffer = n === chunk.byteLength ? chunk : chunk.slice(0, n);
+          fs.writeSync(file.fd, buf);
+          written += n;
+        }
+        fs.fsyncSync(file.fd);
+      } finally {
+        fs.closeSync(file);
+      }
+    } catch (e) {
+      Logger.error('FileUtils', 'writeBytes 失败: ' + path, e as Error);
+    }
+  }
+
   /** 写入文本文件（覆盖） */
   static writeFile(path: string, content: string): void {
     try {

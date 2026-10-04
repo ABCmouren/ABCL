@@ -34,17 +34,53 @@ export class AppStore {
   }
 
   setSelectedAccount(uuid: string): void {
-    this.accounts.forEach(acc => { acc.selected = acc.uuid === uuid; });
+    // ⚠️ 必须产生新数组：ArkUI 的 @State 靠「引用变化」判断要不要重绘。
+    // 原来这里只 forEach 改数组内的对象，数组引用没变 → 界面上的
+    // 选中态完全不刷新，表现就是「离线账户没法切换」。
+    const next: Account[] = [];
+    for (const acc of this.accounts) {
+      const copy: Account = {
+        id: acc.id,
+        uuid: acc.uuid,
+        username: acc.username,
+        userType: acc.userType,
+        type: acc.type,
+        accessToken: acc.accessToken,
+        refreshToken: acc.refreshToken,
+        expiresAt: acc.expiresAt,
+        lastLoginTime: acc.lastLoginTime,
+        selected: acc.uuid === uuid,
+        skinUrl: acc.skinUrl
+      };
+      next.push(copy);
+    }
+    this.accounts = next;
     this.notifyAccountsChanged();
     // Auto-persist
     this.persistAccounts();
   }
 
   addAccount(account: Account): void {
-    if (this.accounts.length === 0) {
-      account.selected = true;
+    // push 不会改变数组引用 → @State 不会重绘，同样要复制一份
+    const next: Account[] = [];
+    for (const acc of this.accounts) {
+      next.push(acc);
     }
-    this.accounts.push(account);
+    const added: Account = {
+      id: account.id,
+      uuid: account.uuid,
+      username: account.username,
+      userType: account.userType,
+      type: account.type,
+      accessToken: account.accessToken,
+      refreshToken: account.refreshToken,
+      expiresAt: account.expiresAt,
+      lastLoginTime: account.lastLoginTime,
+      selected: next.length === 0 ? true : account.selected,
+      skinUrl: account.skinUrl
+    };
+    next.push(added);
+    this.accounts = next;
     this.notifyAccountsChanged();
     // Auto-persist
     this.persistAccounts();

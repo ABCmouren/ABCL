@@ -60,7 +60,7 @@ export default struct AccountPage {
             .fontSize(12)
             .fontColor('#8C1D18')
             .layoutWeight(1);
-          Text('设置 client_id')
+          Text(this.msClientId.trim().length > 0 ? '更换 client_id' : '配置 client_id')
             .fontSize(12)
             .fontColor('#4352A5')
             .padding({ left: 8, right: 4, top: 2, bottom: 2 })
@@ -338,9 +338,10 @@ export default struct AccountPage {
         .fontColor('#1A1A1A')
         .width('100%');
 
-      Text('在 https://portal.azure.com 注册一个「公共客户端」应用，' +
-        '添加 XboxLive.signin 委托权限，把 Application (client) ID 填在这里。' +
-        '这个 ID 没有可用的公共替代，只能用自己的。')
+      Text('微软要求每个应用单独注册登录身份，没有可共用的公共 ID' +
+        '（实测 HMCL 时代的老启动器 ID 在 v2.0 端点已全部失效，返回 AADSTS700016）。' +
+        '注册方法：portal.azure.com → App registrations → New registration →' +
+        '平台选「公共客户端」→ 权限里加 XboxLive.signin（委托）→ 复制 Application (client) ID。')
         .fontSize(11)
         .fontColor('#666666')
         .width('100%')
@@ -451,7 +452,13 @@ export default struct AccountPage {
   private async startMicrosoftFlow(): Promise<void> {
     const clientId = this.msClientId.trim();
     if (clientId.length === 0) {
-      this.loginError = '尚未配置微软 client_id（Application ID）。点击下方「设置 client_id」填入你在 portal.azure.com 注册的应用 ID。';
+      // 措辞对齐 HMCL：它的 getClientId() 为空时显示的是 "snapshot" 提示
+      // （MicrosoftAccountLoginPane: btnLogin.setDisable(true)），
+      // 因为官方 client_id 是构建时注入 jar 的，源码版/快照版拿不到。
+      this.loginError = '当前版本未内置微软 client_id，无法使用微软账号登录。' +
+        '这是上游的限制（HMCL 同样把 client_id 打进发布 jar，源码版也登不了），' +
+        '不是配置错误。你可以在 portal.azure.com 免费注册一个公共客户端应用，' +
+        '把 Application (client) ID 填到右下角即可；也可以先用离线账号或 Authlib-Injector 服务器登录。';
       return;
     }
     this.isLoggingIn = true;

@@ -129,6 +129,10 @@ export class Constants {
   static readonly CONFIG_DIR = 'config';
   static readonly SCREENSHOTS_DIR = 'screenshots';
   static readonly SAVES_DIR = 'saves';
+  static readonly BACKUPS_DIR = 'backups';
+  static readonly MODPACKS_DIR = 'modpacks';
+  static readonly DATAPACKS_DIR = 'datapacks';
+  static readonly SCHEMATICS_DIR = 'schematics';
 
   // Default JVM arguments
   static readonly DEFAULT_JVM_ARGS = [
