@@ -11,6 +11,7 @@ import DownloadPage from './download/DownloadPage';
 import AccountPage from './account/AccountPage';
 import SettingsPage from './settings/SettingsPage';
 import ModPage from './mod/ModPage';
+import PackPage from './pack/PackPage';
 import WorldPage from './world/WorldPage';
 import ModpackPage from './modpack/ModpackPage';
 import { HMCL_NAV, HmclTheme, NavEntry } from '../theme/HmclTheme';
@@ -174,6 +175,10 @@ struct Index {
       AccountPage()
     } else if (this.currentNav === 'mods') {
       ModPage()
+    } else if (this.currentNav === 'resourcepacks') {
+      PackPage({ kind: 'resourcepack' })
+    } else if (this.currentNav === 'shaders') {
+      PackPage({ kind: 'shader' })
     } else if (this.currentNav === 'worlds') {
       WorldPage()
     } else if (this.currentNav === 'modpacks') {

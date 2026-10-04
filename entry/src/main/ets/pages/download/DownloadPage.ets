@@ -15,6 +15,7 @@ import { VersionManager } from '../../core/game/VersionManager';
 import { VersionInstaller } from '../../core/game/VersionInstaller';
 import { CancelToken } from '../../core/download/DownloadEngine';
 import { ModManager } from '../../core/game/ModManager';
+import { PackKind, ResourcePackManager } from '../../core/game/ResourcePackManager';
 import { ModrinthClient, ModrinthSearchHit, ModrinthVersion, ModrinthFile } from '../../core/modplatform/ModrinthClient';
 import { AppStore } from '../../core/AppStore';
 import { HmclTheme } from '../../theme/HmclTheme';
@@ -150,7 +151,9 @@ export default struct DownloadPage {
       if (loader.length === 0) {
         loader = 'fabric';
       }
-      const hits = await ModrinthClient.search(query, 'mod', mc, loader, 0, 20);
+      // 只有模组需要按加载器过滤；资源包/光影只看游戏版本
+      const projectType = this.modProjectType();
+      const hits = await ModrinthClient.search(query, projectType, mc, loader, 0, 20);
       this.modHits = hits;
       if (hits.length === 0) {
         this.modError = mc.length > 0
@@ -194,6 +197,30 @@ export default struct DownloadPage {
   // ============================================================
   //  安装模组
   // ============================================================
+  /** 当前 Tab 对应的 Modrinth project_type */
+  private modProjectType(): string {
+    if (this.tab === 'resourcepack' || this.tab === 'shader' || this.tab === 'modpack') {
+      return this.tab;
+    }
+    return 'mod';
+  }
+
+  private tabTitle(): string {
+    if (this.tab === 'mod') {
+      return '模组';
+    }
+    if (this.tab === 'resourcepack') {
+      return '资源包';
+    }
+    if (this.tab === 'shader') {
+      return '光影';
+    }
+    if (this.tab === 'modpack') {
+      return '整合包';
+    }
+    return '游戏';
+  }
+
   private async openModVersions(hit: ModrinthSearchHit): Promise<void> {
     this.modPick = hit;
     this.modVersions = [];
@@ -221,7 +248,20 @@ export default struct DownloadPage {
         return;
       }
     }
-    const target = ModManager.installJar(mcDir, tmp, file.filename);
+    let target = '';
+    if (this.tab === 'resourcepack') {
+      target = ResourcePackManager.installFile(mcDir, PackKind.RESOURCE, tmp, file.filename);
+    } else if (this.tab === 'shader') {
+      target = ResourcePackManager.installFile(mcDir, PackKind.SHADER, tmp, file.filename);
+    } else if (this.tab === 'modpack') {
+      // 整合包需要解包 + 建实例，属于 P0-4，这里先只落盘到 modpacks 暂存目录
+      FileUtils.mkdirs(`${mcDir}/modpacks`);
+      target = `${mcDir}/modpacks/${file.filename}`;
+      FileUtils.copyFile(tmp, target);
+      FileUtils.delete(tmp);
+    } else {
+      target = ModManager.installJar(mcDir, tmp, file.filename);
+    }
     this.modNote = `已安装到 ${target}`;
     this.modPick = null;
     this.modVersions = [];
@@ -532,7 +572,7 @@ export default struct DownloadPage {
   ModTab() {
     Column() {
       Row() {
-        TextInput({ placeholder: '在 Modrinth 搜索模组…', text: this.modQuery })
+        TextInput({ placeholder: `在 Modrinth 搜索${this.tabTitle()}…`, text: this.modQuery })
           .layoutWeight(1)
           .height(34)
           .fontSize(13)

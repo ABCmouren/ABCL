@@ -70,6 +70,8 @@ export const HMCL_NAV: NavEntry[] = [
   { key: 'download', label: '下载', glyph: '⤓' },
   { key: 'accounts', label: '账户', glyph: '☺' },
   { key: 'mods', label: '模组', glyph: '❖' },
+  { key: 'resourcepacks', label: '资源包', glyph: '◫' },
+  { key: 'shaders', label: '光影', glyph: '✦' },
   { key: 'worlds', label: '世界', glyph: '◍' },
   { key: 'modpacks', label: '整合包', glyph: '⛁' },
   { key: 'settings', label: '设置', glyph: '⚙' },
