@@ -70,6 +70,10 @@ export class Constants {
   static readonly PREF_KEY_INSTALLATIONS = 'hmcl_installations';
   static readonly PREF_KEY_LAUNCH_SETTINGS = 'hmcl_launch_settings';
   static readonly PREF_KEY_DOWNLOAD_SOURCE = 'hmcl_download_source';
+  /** 远端资源源：'modrinth' | 'curseforge' */
+  static readonly PREF_KEY_REMOTE_SOURCE = 'abcl_remote_source';
+  /** CurseForge API Key（CurseForge 强制要求，由用户自备） */
+  static readonly PREF_KEY_CURSEFORGE_KEY = 'abcl_curseforge_key';
 
   // 应用沙箱根目录：由 EntryAbility 在启动时用 context.filesDir 注入。
   // 旧代码把它硬编码成 '/data/app/el2/100/base/com.hmcl.launcher/'，

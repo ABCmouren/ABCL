@@ -156,6 +156,15 @@ export class FileUtils {
     }
   }
 
+  /** 最后修改时间（毫秒），失败返回 0 */
+  static statMtime(path: string): number {
+    try {
+      return fs.statSync(path).mtime * 1000;
+    } catch {
+      return 0;
+    }
+  }
+
   static getFileSize(path: string): number {
     try {
       if (!FileUtils.exists(path)) {

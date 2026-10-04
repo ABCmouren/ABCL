@@ -16,10 +16,14 @@ import { VersionInstaller } from '../../core/game/VersionInstaller';
 import { CancelToken } from '../../core/download/DownloadEngine';
 import { ModManager } from '../../core/game/ModManager';
 import { PackKind, ResourcePackManager } from '../../core/game/ResourcePackManager';
-import { ModrinthClient, ModrinthSearchHit, ModrinthVersion, ModrinthFile } from '../../core/modplatform/ModrinthClient';
+import {
+  ModrinthClient, ModrinthSearchHit, ModrinthVersion, ModrinthFile, ModrinthCategory
+} from '../../core/modplatform/ModrinthClient';
 import { AppStore } from '../../core/AppStore';
 import { HmclTheme } from '../../theme/HmclTheme';
 import { FileUtils, Logger, StringUtils } from '../../core/util/Utils';
+import { CurseForgeClient, CfCategory } from '../../core/modplatform/CurseForgeClient';
+import { PreferencesManager } from '../../core/storage/PreferencesManager';
 import { EmptyView, LoadingView } from '../../components/common/CommonComponents';
 import { HttpClient } from '../../core/network/HttpClient';
 
@@ -51,6 +55,39 @@ export default struct DownloadPage {
   @State modVersions: ModrinthVersion[] = [];
   @State modVersionsLoading: boolean = false;
   @State modNote: string = '';
+  /** 分页（对齐 HMCL：pageOffset 从 0 开始，pageSize=50） */
+  @State modPage: number = 0;
+  @State modPageCount: number = -1;
+  @State modTotal: number = 0;
+  @State modSort: string = ModrinthClient.SORT_RELEVANCE;
+
+  /** 筛选条件（对应 HMCL 的 gameVersionField / categoryComboBox / 加载器） */
+  @State filterVersion: string = '';
+  @State filterCategory: string = '';
+  @State filterLoader: string = '';
+  @State tagLoading: boolean = false;
+
+  /** 通用选择器弹层 */
+  @State pickerVisible: boolean = false;
+  @State pickerTitle: string = '';
+  @State pickerKind: string = '';
+  @State pickerValues: string[] = [];
+  @State pickerLabels: string[] = [];
+  @State categoryTags: ModrinthCategory[] = [];
+  @State versionTags: string[] = [];
+  @State loaderTags: string[] = [];
+  /** CurseForge 用数字分类 id，与 pickerValues 对齐 */
+  @State pickerCatIds: number[] = [];
+  @State filterCategoryId: number = 0;
+  @State cfCategories: CfCategory[] = [];
+
+  /** 远端源：modrinth | curseforge */
+  @State remoteSource: string = 'modrinth';
+  @State cfKeyConfigured: boolean = false;
+  @State keyInputVisible: boolean = false;
+  @State keyInput: string = '';
+
+  private prefs: PreferencesManager = PreferencesManager.getInstance();
 
   private versionManager = VersionManager.getInstance();
   private store = AppStore.getInstance();
@@ -59,7 +96,78 @@ export default struct DownloadPage {
   aboutToAppear(): void {
     this.loadInstalled();
     this.loadGameVersions();
-    this.searchMods('');
+    // 默认跟随当前实例的 MC 版本与加载器（HMCL 也是把已选实例的版本带进来）
+    this.filterVersion = this.instanceMcVersion();
+    this.filterLoader = this.instanceLoader();
+    this.restoreRemoteSource();
+  }
+
+  /** 恢复上次选择的远端源与 CurseForge Key */
+  private async restoreRemoteSource(): Promise<void> {
+    try {
+      const src = await this.prefs.getRemoteSource();
+      this.remoteSource = src.length > 0 ? src : 'modrinth';
+      const key = await this.prefs.getCurseForgeKey();
+      if (key.length > 0) {
+        CurseForgeClient.setApiKey(key);
+        this.cfKeyConfigured = true;
+      }
+    } catch (e) {
+      Logger.warn('DownloadPage', `恢复远端源失败: ${(e as Error).message}`);
+    }
+    Logger.info('DownloadPage', `远端源=${this.remoteSource} curseforgeKey=${this.cfKeyConfigured}`);
+    this.searchMods('', 0);
+    this.loadFilterTags();
+  }
+
+  private switchSource(src: string): void {
+    if (this.remoteSource === src) {
+      return;
+    }
+    this.remoteSource = src;
+    this.filterCategory = '';
+    this.filterCategoryId = 0;
+    this.categoryTags = [];
+    this.pickerCatIds = [];
+    void this.prefs.setRemoteSource(src);
+    this.searchMods(this.modQuery, 0);
+    this.loadFilterTags();
+  }
+
+  private async saveCfKey(): Promise<void> {
+    const key = this.keyInput.trim();
+    await this.prefs.setCurseForgeKey(key);
+    CurseForgeClient.setApiKey(key);
+    this.cfKeyConfigured = key.length > 0;
+    this.keyInputVisible = false;
+    this.loadFilterTags();
+    this.searchMods(this.modQuery, 0);
+  }
+
+  /** 拉取分类 / 游戏版本 / 加载器标签，供筛选下拉使用 */
+  private async loadFilterTags(): Promise<void> {
+    this.tagLoading = true;
+    try {
+      const categories = await ModrinthClient.getCategories(this.modProjectType());
+      this.categoryTags = categories;
+      const loaders = await ModrinthClient.getLoaders(this.modProjectType());
+      this.loaderTags = loaders;
+      if (this.versionTags.length === 0) {
+        const versions = await ModrinthClient.getGameVersions();
+        const list: string[] = [];
+        for (const v of versions) {
+          if (v.version_type === 'release') {
+            list.push(v.version);
+          }
+        }
+        this.versionTags = list;
+      }
+      Logger.info('DownloadPage',
+        `筛选标签就绪：分类 ${categories.length} · 版本 ${this.versionTags.length} · 加载器 ${loaders.length}`);
+    } catch (e) {
+      Logger.warn('DownloadPage', `筛选标签拉取失败: ${(e as Error).message}`);
+    }
+    this.tagLoading = false;
   }
 
   // ============================================================
@@ -141,10 +249,13 @@ export default struct DownloadPage {
     return '';
   }
 
-  private async searchMods(query: string): Promise<void> {
+  /**
+   * 搜索远端资源（分页版）
+   * @param page 页号，从 0 开始；只有「搜索/换排序/换 Tab」时才传 0
+   */
+  private async searchMods(query: string, page: number): Promise<void> {
     this.modLoading = true;
     this.modError = '';
-    this.modNote = '';
     try {
       const mc = this.instanceMcVersion();
       let loader = this.instanceLoader();
@@ -153,22 +264,66 @@ export default struct DownloadPage {
       }
       // 只有模组需要按加载器过滤；资源包/光影只看游戏版本
       const projectType = this.modProjectType();
-      const hits = await ModrinthClient.search(query, projectType, mc, loader, 0, 20);
-      this.modHits = hits;
-      if (hits.length === 0) {
-        this.modError = mc.length > 0
-          ? `没有找到适配 ${mc} / ${loader} 的模组`
-          : '没有找到模组';
-      } else {
-        this.modNote = mc.length > 0
-          ? `按 ${mc} · ${loader} 过滤，共 ${hits.length} 条`
-          : `共 ${hits.length} 条`;
+      // 筛选优先用工具栏里选的值；未选时回退到当前实例的 MC 版本 / 加载器
+      const version = this.filterVersion.length > 0 ? this.filterVersion : mc;
+      const loaderEff = this.filterLoader.length > 0 ? this.filterLoader : loader;
+
+      if (this.remoteSource === 'curseforge' && !this.cfKeyConfigured) {
+        this.modHits = [];
+        this.modTotal = 0;
+        this.modPageCount = 0;
+        this.modError = 'CurseForge 需要 API Key（在 curseforge.com 申请后，点上面的「CurseForge Key」填入）';
+        this.modLoading = false;
+        return;
       }
+
+      const result = this.remoteSource === 'curseforge'
+        ? await CurseForgeClient.search(query, projectType, version, loaderEff, page,
+            CurseForgeClient.PAGE_SIZE, this.modSort, this.filterCategoryId)
+        : await ModrinthClient.search(query, projectType, version, loaderEff, page,
+            ModrinthClient.PAGE_SIZE, this.modSort, this.filterCategory);
+      this.modHits = result.hits;
+      this.modPage = result.offset;
+      this.modPageCount = result.pageCount;
+      this.modTotal = result.totalHits;
+      const bits: string[] = [];
+      if (version.length > 0) {
+        bits.push(version);
+      }
+      if (projectType === 'mod' && loaderEff.length > 0) {
+        bits.push(loaderEff);
+      }
+      if (this.filterCategory.length > 0) {
+        bits.push('#' + this.filterCategory);
+      }
+      const filter = bits.length > 0 ? `（${bits.join(' · ')}）` : '';
+      if (this.modHits.length === 0) {
+        this.modError = `没有找到${this.tabTitle()}${filter}`;
+      } else {
+        this.modNote = `共 ${result.totalHits} 个结果${filter} · 第 ${result.offset + 1}/${result.pageCount} 页`;
+      }
+      Logger.info('DownloadPage',
+        `Modrinth 搜索 ${projectType} page=${result.offset} 命中 ${this.modHits.length}/${result.totalHits}`);
     } catch (e) {
       this.modError = 'Modrinth 搜索失败：' + (e as Error).message;
       Logger.error('DownloadPage', this.modError);
     }
     this.modLoading = false;
+  }
+
+  private gotoPage(page: number): void {
+    if (page < 0) {
+      return;
+    }
+    if (this.modPageCount >= 0 && page >= this.modPageCount) {
+      return;
+    }
+    this.searchMods(this.modQuery, page);
+  }
+
+  private changeSort(sort: string): void {
+    this.modSort = sort;
+    this.searchMods(this.modQuery, 0);
   }
 
   // ============================================================
@@ -225,7 +380,11 @@ export default struct DownloadPage {
     this.modPick = hit;
     this.modVersions = [];
     this.modVersionsLoading = true;
-    const versions = await ModrinthClient.getVersions(hit.project_id, this.instanceMcVersion(), this.instanceLoader());
+    const mc = this.filterVersion.length > 0 ? this.filterVersion : this.instanceMcVersion();
+    const loaderEff = this.filterLoader.length > 0 ? this.filterLoader : this.instanceLoader();
+    const versions = this.remoteSource === 'curseforge'
+      ? await CurseForgeClient.getFiles(hit.project_id, mc, loaderEff, this.modProjectType())
+      : await ModrinthClient.getVersions(hit.project_id, mc, loaderEff);
     this.modVersions = versions;
     this.modVersionsLoading = false;
   }
@@ -291,6 +450,14 @@ export default struct DownloadPage {
 
       if (this.modPick !== null) {
         this.ModVersionOverlay()
+      }
+
+      if (this.pickerVisible) {
+        this.PickerOverlay()
+      }
+
+      if (this.keyInputVisible) {
+        this.KeyOverlay()
       }
     }
     .width('100%')
@@ -405,9 +572,103 @@ export default struct DownloadPage {
       this.TabChip('资源包', 'resourcepack');
       this.TabChip('光影', 'shader');
       this.TabChip('整合包', 'modpack');
+
+      Blank();
+
+      // 下载源（对应 HMCL 的 downloadSourceComboBox）
+      if (this.tab !== 'game') {
+        this.SourceChip('Modrinth', 'modrinth');
+        this.SourceChip('CurseForge', 'curseforge');
+        if (this.remoteSource === 'curseforge') {
+          Text(this.cfKeyConfigured ? 'Key ✓' : 'CurseForge Key')
+            .fontSize(11)
+            .fontColor(this.cfKeyConfigured ? HmclTheme.ON_SECONDARY_CONTAINER : HmclTheme.ERROR)
+            .backgroundColor(this.cfKeyConfigured
+              ? HmclTheme.SECONDARY_CONTAINER : HmclTheme.ERROR_CONTAINER)
+            .borderRadius(10)
+            .padding({ left: 10, right: 10, top: 4, bottom: 4 })
+            .margin({ left: 6 })
+            .onClick(() => {
+              this.keyInput = '';
+              this.keyInputVisible = true;
+            });
+        }
+      }
     }
     .width('100%')
     .padding({ left: 20, right: 20, top: 16, bottom: 10 })
+  }
+
+  @Builder
+  SourceChip(label: string, src: string) {
+    Text(label)
+      .fontSize(11)
+      .fontColor(this.remoteSource === src ? HmclTheme.ON_PRIMARY_CONTAINER : HmclTheme.ON_SURFACE_VARIANT)
+      .backgroundColor(this.remoteSource === src ? HmclTheme.PRIMARY_CONTAINER : HmclTheme.SURFACE_CONTAINER)
+      .borderRadius(10)
+      .padding({ left: 10, right: 10, top: 4, bottom: 4 })
+      .margin({ left: 6 })
+      .onClick(() => {
+        this.switchSource(src);
+      })
+  }
+
+  @Builder
+  KeyOverlay() {
+    Column() {
+      Text('CurseForge API Key')
+        .fontSize(16)
+        .fontWeight(FontWeight.Bold)
+        .fontColor(HmclTheme.ON_SURFACE)
+        .width('100%');
+      Text('CurseForge 强制要求每个应用使用自己的 API Key（不能用别人的）。' +
+        '去 console.curseforge.com 免费申请后填在这里，只保存在本机。')
+        .fontSize(11)
+        .fontColor(HmclTheme.ON_SURFACE_VARIANT)
+        .width('100%')
+        .margin({ top: 8, bottom: 14 });
+
+      TextInput({ placeholder: '粘贴 $2a$10$... 形式的 key', text: this.keyInput })
+        .width('100%')
+        .height(38)
+        .fontSize(12)
+        .backgroundColor(HmclTheme.SURFACE_CONTAINER)
+        .borderRadius(8)
+        .onChange((v: string) => {
+          this.keyInput = v;
+        });
+
+      Row() {
+        Button('取消')
+          .layoutWeight(1)
+          .height(38)
+          .fontSize(13)
+          .fontColor(HmclTheme.ON_SURFACE_VARIANT)
+          .backgroundColor(HmclTheme.SURFACE_CONTAINER)
+          .borderRadius(10)
+          .onClick(() => {
+            this.keyInputVisible = false;
+          });
+        Button('保存')
+          .layoutWeight(1)
+          .height(38)
+          .fontSize(13)
+          .fontColor(HmclTheme.ON_PRIMARY_CONTAINER)
+          .backgroundColor(HmclTheme.PRIMARY_CONTAINER)
+          .borderRadius(10)
+          .margin({ left: 10 })
+          .onClick(() => {
+            this.saveCfKey();
+          });
+      }
+      .width('100%')
+      .margin({ top: 16 });
+    }
+    .width(480)
+    .padding(24)
+    .backgroundColor(HmclTheme.SURFACE_CONTAINER_LOWEST)
+    .borderRadius(HmclTheme.CARD_RADIUS)
+    .shadow({ radius: 24, color: '#33000000', offsetX: 0, offsetY: 8 })
   }
 
   @Builder
@@ -422,7 +683,7 @@ export default struct DownloadPage {
       .onClick(() => {
         this.tab = key;
         if (key === 'mod' || key === 'resourcepack' || key === 'shader' || key === 'modpack') {
-          this.searchMods(this.modQuery);
+          this.searchMods(this.modQuery, 0);
         }
       })
   }
@@ -581,6 +842,16 @@ export default struct DownloadPage {
           .onChange((v: string) => {
             this.modQuery = v;
           });
+        if (this.modQuery.length > 0) {
+          Text('清空')
+            .fontSize(12)
+            .fontColor(HmclTheme.ON_SURFACE_VARIANT)
+            .padding({ left: 10, right: 10, top: 8, bottom: 8 })
+            .onClick(() => {
+              this.modQuery = '';
+              this.searchMods('', 0);
+            });
+        }
         Text('搜索')
           .fontSize(13)
           .fontColor(HmclTheme.ON_PRIMARY_CONTAINER)
@@ -589,8 +860,36 @@ export default struct DownloadPage {
           .padding({ left: 14, right: 14, top: 8, bottom: 8 })
           .margin({ left: 8 })
           .onClick(() => {
-            this.searchMods(this.modQuery);
+            this.searchMods(this.modQuery, 0);
           });
+      }
+      .width('100%')
+      .padding({ left: 20, right: 20, bottom: 8 })
+
+      // 筛选栏（对应 HMCL 的 gameVersionField / categoryComboBox）
+      Row() {
+        this.FilterButton('版本', this.filterVersion.length > 0 ? this.filterVersion : '全部', 'version');
+        this.FilterButton('分类', this.filterCategory.length > 0 ? this.filterCategory : '全部', 'category');
+        if (this.modProjectType() === 'mod') {
+          this.FilterButton('加载器', this.filterLoader.length > 0 ? this.filterLoader : '全部', 'loader');
+        }
+        Blank();
+        if (this.tagLoading) {
+          Text('加载筛选项…')
+            .fontSize(11)
+            .fontColor(HmclTheme.OUTLINE);
+        }
+      }
+      .width('100%')
+      .padding({ left: 20, right: 20, bottom: 8 })
+
+      // 排序（对应 HMCL 的 SortType）
+      Row() {
+        this.SortChip('相关性', ModrinthClient.SORT_RELEVANCE);
+        this.SortChip('下载量', ModrinthClient.SORT_DOWNLOADS);
+        this.SortChip('关注数', ModrinthClient.SORT_FOLLOWS);
+        this.SortChip('最新发布', ModrinthClient.SORT_NEWEST);
+        this.SortChip('最近更新', ModrinthClient.SORT_UPDATED);
       }
       .width('100%')
       .padding({ left: 20, right: 20, bottom: 8 })
@@ -625,10 +924,209 @@ export default struct DownloadPage {
         .layoutWeight(1)
         .width('100%')
         .divider({ strokeWidth: 1, color: HmclTheme.OUTLINE_VARIANT, startMargin: 20 })
+
+        // 分页（对应 HMCL DownloadListPage 的 上一页 / 第 N 页共 M 页 / 下一页）
+        Row() {
+          Text('上一页')
+            .fontSize(13)
+            .fontColor(this.modPage > 0 ? HmclTheme.PRIMARY : HmclTheme.OUTLINE)
+            .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+            .onClick(() => {
+              this.gotoPage(this.modPage - 1);
+            });
+          Blank();
+          Text(this.pageLabel())
+            .fontSize(12)
+            .fontColor(HmclTheme.ON_SURFACE_VARIANT);
+          Blank();
+          Text('下一页')
+            .fontSize(13)
+            .fontColor(this.canNext() ? HmclTheme.PRIMARY : HmclTheme.OUTLINE)
+            .padding({ left: 12, right: 12, top: 6, bottom: 6 })
+            .onClick(() => {
+              this.gotoPage(this.modPage + 1);
+            });
+        }
+        .width('100%')
+        .padding({ left: 20, right: 20, top: 8, bottom: 8 })
+        .backgroundColor(HmclTheme.SURFACE_CONTAINER)
       }
     }
     .layoutWeight(1)
     .width('100%')
+  }
+
+  private canNext(): boolean {
+    if (this.modPageCount <= 0) {
+      return false;
+    }
+    return this.modPage < this.modPageCount - 1;
+  }
+
+  private pageLabel(): string {
+    const total = this.modPageCount < 0 ? '-' : this.modPageCount.toString();
+    return `第 ${this.modPage + 1} / ${total} 页 · 共 ${this.modTotal} 个`;
+  }
+
+  @Builder
+  FilterButton(label: string, value: string, kind: string) {
+    Row() {
+      Text(`${label}：`)
+        .fontSize(12)
+        .fontColor(HmclTheme.ON_SURFACE_VARIANT);
+      Text(value)
+        .fontSize(12)
+        .fontColor(HmclTheme.PRIMARY)
+        .maxLines(1)
+        .textOverflow({ overflow: TextOverflow.Ellipsis });
+      Text(' ▾')
+        .fontSize(10)
+        .fontColor(HmclTheme.ON_SURFACE_VARIANT);
+    }
+    .height(30)
+    .constraintSize({ maxWidth: 260 })
+    .padding({ left: 10, right: 10 })
+    .margin({ right: 8 })
+    .borderRadius(8)
+    .backgroundColor(HmclTheme.SURFACE_CONTAINER)
+    .onClick(() => {
+      this.openPicker(kind);
+    })
+  }
+
+  /** 打开通用筛选选择器 */
+  private openPicker(kind: string): void {
+    const values: string[] = [];
+    const labels: string[] = [];
+    values.push('');
+    labels.push('全部');
+    const catIds: number[] = [0];
+    if (kind === 'version') {
+      this.pickerTitle = '选择游戏版本';
+      for (const v of this.versionTags) {
+        values.push(v);
+        labels.push(v);
+      }
+    } else if (kind === 'category') {
+      this.pickerTitle = '选择分类';
+      if (this.remoteSource === 'curseforge') {
+        for (const c of this.cfCategories) {
+          values.push(c.name);
+          labels.push(c.name);
+          catIds.push(c.id);
+        }
+      } else {
+        for (const c of this.categoryTags) {
+          values.push(c.name);
+          labels.push(`${c.name}（${c.header}）`);
+          catIds.push(0);
+        }
+      }
+    } else {
+      this.pickerTitle = '选择加载器';
+      for (const l of this.loaderTags) {
+        values.push(l);
+        labels.push(l);
+      }
+    }
+    this.pickerKind = kind;
+    this.pickerValues = values;
+    this.pickerLabels = labels;
+    this.pickerCatIds = catIds;
+    this.pickerVisible = true;
+  }
+
+  private applyPick(value: string): void {
+    if (this.pickerKind === 'version') {
+      this.filterVersion = value;
+    } else if (this.pickerKind === 'category') {
+      this.filterCategory = value;
+      const idx = this.pickerValues.indexOf(value);
+      this.filterCategoryId = idx >= 0 && idx < this.pickerCatIds.length ? this.pickerCatIds[idx] : 0;
+    } else {
+      this.filterLoader = value;
+    }
+    this.pickerVisible = false;
+    this.searchMods(this.modQuery, 0);
+  }
+
+  @Builder
+  PickerOverlay() {
+    Column() {
+      Row() {
+        Text(this.pickerTitle)
+          .fontSize(16)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(HmclTheme.ON_SURFACE)
+          .layoutWeight(1);
+        Text('关闭')
+          .fontSize(13)
+          .fontColor(HmclTheme.PRIMARY)
+          .onClick(() => {
+            this.pickerVisible = false;
+          });
+      }
+      .width('100%')
+      .padding({ left: 20, right: 20, top: 16, bottom: 10 });
+
+      List() {
+        ForEach(this.pickerValues, (value: string, index: number) => {
+          ListItem() {
+            Row() {
+              Text(this.pickerLabels[index])
+                .fontSize(13)
+                .fontColor(HmclTheme.ON_SURFACE)
+                .maxLines(1)
+                .textOverflow({ overflow: TextOverflow.Ellipsis })
+                .layoutWeight(1);
+              if (this.currentPick() === value) {
+                Text('✓')
+                  .fontSize(13)
+                  .fontColor(HmclTheme.PRIMARY);
+              }
+            }
+            .width('100%')
+            .height(44)
+            .padding({ left: 20, right: 20 })
+            .onClick(() => {
+              this.applyPick(value);
+            });
+          }
+        }, (value: string) => `${this.pickerKind}-${value}`)
+      }
+      .layoutWeight(1)
+      .width('100%')
+      .divider({ strokeWidth: 1, color: HmclTheme.OUTLINE_VARIANT, startMargin: 20 })
+    }
+    .width('62%')
+    .height('74%')
+    .backgroundColor(HmclTheme.SURFACE_CONTAINER_LOWEST)
+    .borderRadius(HmclTheme.CARD_RADIUS)
+    .shadow({ radius: 24, color: '#33000000', offsetX: 0, offsetY: 8 })
+  }
+
+  private currentPick(): string {
+    if (this.pickerKind === 'version') {
+      return this.filterVersion;
+    }
+    if (this.pickerKind === 'category') {
+      return this.filterCategory;
+    }
+    return this.filterLoader;
+  }
+
+  @Builder
+  SortChip(label: string, sort: string) {
+    Text(label)
+      .fontSize(12)
+      .fontColor(this.modSort === sort ? HmclTheme.ON_SECONDARY_CONTAINER : HmclTheme.ON_SURFACE_VARIANT)
+      .backgroundColor(this.modSort === sort ? HmclTheme.SECONDARY_CONTAINER : Color.Transparent)
+      .borderRadius(12)
+      .padding({ left: 12, right: 12, top: 5, bottom: 5 })
+      .margin({ right: 6 })
+      .onClick(() => {
+        this.changeSort(sort);
+      })
   }
 
   @Builder

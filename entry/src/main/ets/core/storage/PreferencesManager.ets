@@ -326,6 +326,40 @@ export class PreferencesManager {
   /**
    * 保存下载来源设置
    */
+  /** 远端资源源（Modrinth / CurseForge） */
+  async getRemoteSource(): Promise<string> {
+    if (!this.preferences) {
+      return 'modrinth';
+    }
+    const val = await this.preferences.get(Constants.PREF_KEY_REMOTE_SOURCE, 'modrinth');
+    return val as string;
+  }
+
+  async setRemoteSource(source: string): Promise<void> {
+    if (!this.preferences) {
+      return;
+    }
+    await this.preferences.put(Constants.PREF_KEY_REMOTE_SOURCE, source);
+    await this.preferences.flush();
+  }
+
+  /** CurseForge API Key（用户自备） */
+  async getCurseForgeKey(): Promise<string> {
+    if (!this.preferences) {
+      return '';
+    }
+    const val = await this.preferences.get(Constants.PREF_KEY_CURSEFORGE_KEY, '');
+    return val as string;
+  }
+
+  async setCurseForgeKey(key: string): Promise<void> {
+    if (!this.preferences) {
+      return;
+    }
+    await this.preferences.put(Constants.PREF_KEY_CURSEFORGE_KEY, key);
+    await this.preferences.flush();
+  }
+
   async setDownloadSource(source: DownloadSource): Promise<void> {
     if (!this.preferences) return;
     await this.preferences.put(Constants.PREF_KEY_DOWNLOAD_SOURCE, source);
