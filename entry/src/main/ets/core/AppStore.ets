@@ -17,10 +17,14 @@ export class AppStore {
   downloadProgress: number = 0;
   selectedInstallation: GameInstallation | null = null;
 
-  // Callbacks
-  private onConfigChange: ((config: LauncherConfig) => void) | null = null;
-  private onAccountsChange: ((accounts: Account[]) => void) | null = null;
-  private onInstallationsChange: ((installations: GameInstallation[]) => void) | null = null;
+  // 监听器列表
+  //
+  // 原来这里是单槽回调（private onAccountsChange: ((...) => void) | null），
+  // 多个页面订阅时会互相覆盖 —— 比如账户页一订阅就把 Index 的顶掉，
+  // 于是侧栏的「当前账户」永远不刷新，必须切页顺带重建才更新。
+  private configListeners: ((config: LauncherConfig) => void)[] = [];
+  private accountListeners: ((accounts: Account[]) => void)[] = [];
+  private installationListeners: ((installations: GameInstallation[]) => void)[] = [];
 
   static getInstance(): AppStore {
     if (!AppStore.instance) {
@@ -31,6 +35,16 @@ export class AppStore {
 
   getSelectedAccount(): Account | null {
     return this.accounts.find(acc => acc.selected) || null;
+  }
+
+  /**
+   * 由 PreferencesManager 在异步加载完成后调用。
+   * 直接写 this.store.accounts 会绕过通知，导致订阅者（侧栏「当前账户」）
+   * 在冷启动后一直显示「未登录」，必须切页才刷新。
+   */
+  setAccounts(accounts: Account[]): void {
+    this.accounts = accounts;
+    this.notifyAccountsChanged();
   }
 
   setSelectedAccount(uuid: string): void {
@@ -113,8 +127,8 @@ export class AppStore {
       fontSize: config.fontSize !== undefined ? config.fontSize : this.config.fontSize,
       showSidebar: config.showSidebar !== undefined ? config.showSidebar : this.config.showSidebar
     };
-    if (this.onConfigChange) {
-      this.onConfigChange(this.config);
+    for (const cb of this.configListeners) {
+      cb(this.config);
     }
     // Auto-persist config changes
     this.persistConfig();
@@ -131,28 +145,40 @@ export class AppStore {
     this.persistInstallations();
   }
 
-  onConfigChanged(callback: (config: LauncherConfig) => void): void {
-    this.onConfigChange = callback;
+  /** 订阅配置变化（可多页面同时订阅，返回取消订阅函数） */
+  onConfigChanged(callback: (config: LauncherConfig) => void): () => void {
+    this.configListeners.push(callback);
+    return () => {
+      this.configListeners = this.configListeners.filter((cb: (c: LauncherConfig) => void) => cb !== callback);
+    };
   }
 
   private notifyAccountsChanged(): void {
-    if (this.onAccountsChange) {
-      this.onAccountsChange(this.accounts);
+    for (const cb of this.accountListeners) {
+      cb(this.accounts);
     }
   }
 
-  onAccountsChanged(callback: (accounts: Account[]) => void): void {
-    this.onAccountsChange = callback;
+  /** 订阅账户变化（Index 的侧栏「当前账户」靠它刷新） */
+  onAccountsChanged(callback: (accounts: Account[]) => void): () => void {
+    this.accountListeners.push(callback);
+    return () => {
+      this.accountListeners = this.accountListeners.filter((cb: (a: Account[]) => void) => cb !== callback);
+    };
   }
 
   private notifyInstallationsChanged(): void {
-    if (this.onInstallationsChange) {
-      this.onInstallationsChange(this.installations);
+    for (const cb of this.installationListeners) {
+      cb(this.installations);
     }
   }
 
-  onInstallationsChanged(callback: (installations: GameInstallation[]) => void): void {
-    this.onInstallationsChange = callback;
+  onInstallationsChanged(callback: (installations: GameInstallation[]) => void): () => void {
+    this.installationListeners.push(callback);
+    return () => {
+      this.installationListeners =
+        this.installationListeners.filter((cb: (i: GameInstallation[]) => void) => cb !== callback);
+    };
   }
 
   // ===== 自动持久化（异步，不阻塞调用方） =====

@@ -27,9 +27,21 @@ export default struct AccountPage {
 
   private authService = new AuthService();
   private store = AppStore.getInstance();
+  private unsubscribe: (() => void) | null = null;
 
   aboutToAppear(): void {
     this.accounts = this.authService.loadAccounts();
+    // 订阅 store：别处（如侧栏、启动前检查）改动账号时本页也同步
+    this.unsubscribe = this.store.onAccountsChanged((list: Account[]) => {
+      this.accounts = list;
+    });
+  }
+
+  aboutToDisappear(): void {
+    if (this.unsubscribe !== null) {
+      this.unsubscribe();
+      this.unsubscribe = null;
+    }
   }
 
   build() {
@@ -105,7 +117,10 @@ export default struct AccountPage {
             ListItem() {
               this.AccountCard(account)
             }
-          }, (account: Account) => account.uuid);
+          // ⚠️ key 必须包含 selected：否则切换账号时 key 不变，
+          // ArkUI 会复用旧节点，if (account.selected) 里的「Selected」
+          // 标签与按钮配色都不会重算 → 必须切页刷新才看得出变化。
+          }, (account: Account) => `${account.uuid}|${account.selected ? 'sel' : 'unsel'}`);
         }
         .width('100%')
         .layoutWeight(1)
@@ -171,9 +186,8 @@ export default struct AccountPage {
         .backgroundColor(Color.Transparent)
         .onClick(() => {
           if (!account.selected) {
-            this.authService.loadAccounts();
+            // setSelectedAccount 会产生新数组并通知订阅者，本页据此刷新
             this.store.setSelectedAccount(account.uuid);
-            this.accounts = this.authService.getAccounts();
           }
         });
     }

@@ -290,7 +290,7 @@ export class PreferencesManager {
         }
       }
 
-      this.store.accounts = accounts;
+      this.store.setAccounts(accounts);
       Logger.info(PreferencesManager.TAG, `Accounts loaded: ${accounts.length}`);
     } catch (e) {
       Logger.error(PreferencesManager.TAG, `Failed to load accounts: ${(e as Error).message}`);
@@ -307,7 +307,7 @@ export class PreferencesManager {
       const installationsJson = await this.preferences.get(Constants.PREF_KEY_INSTALLATIONS, '[]');
       const installations = JSON.parse(installationsJson as string) as GameInstallation[];
 
-      this.store.installations = installations;
+      this.store.setInstallations(installations);
       Logger.info(PreferencesManager.TAG, `Installations loaded: ${installations.length}`);
     } catch (e) {
       Logger.error(PreferencesManager.TAG, `Failed to load installations: ${(e as Error).message}`);

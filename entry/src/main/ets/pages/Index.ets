@@ -16,13 +16,59 @@ import WorldPage from './world/WorldPage';
 import ModpackPage from './modpack/ModpackPage';
 import { HMCL_NAV, HmclTheme, NavEntry } from '../theme/HmclTheme';
 import { AppStore } from '../core/AppStore';
+import { Account } from '../model/Account';
+import { GameInstallation } from '../model/GameVersion';
 
 @Entry
 @Component
 struct Index {
   @State currentNav: string = 'instances';
 
+  /**
+   * 侧栏「当前账户」必须用 @State 存，
+   * 不能在 build() 里调 this.accountLabel() —— ArkUI V1 不追踪方法返回值，
+   * 结果就是切账号后侧栏不动，得切一次页面（触发重建）才显示。
+   */
+  @State accountLabelText: string = '未登录';
+  @State statusText: string = '';
+
   private store = AppStore.getInstance();
+  private unsubscribeAccounts: (() => void) | null = null;
+  private unsubscribeInstallations: (() => void) | null = null;
+
+  aboutToAppear(): void {
+    this.refreshAccountLabel();
+    this.refreshStatus();
+    // 订阅全局状态：账户/实例一变，侧栏与状态条立即刷新
+    this.unsubscribeAccounts = this.store.onAccountsChanged((accounts: Account[]) => {
+      this.accountLabelText = this.store.getSelectedAccount() !== null
+        ? this.store.getSelectedAccount()!.username
+        : '未登录';
+    });
+    this.unsubscribeInstallations = this.store.onInstallationsChanged((list: GameInstallation[]) => {
+      this.refreshStatus();
+    });
+  }
+
+  aboutToDisappear(): void {
+    if (this.unsubscribeAccounts !== null) {
+      this.unsubscribeAccounts();
+      this.unsubscribeAccounts = null;
+    }
+    if (this.unsubscribeInstallations !== null) {
+      this.unsubscribeInstallations();
+      this.unsubscribeInstallations = null;
+    }
+  }
+
+  private refreshAccountLabel(): void {
+    const account = this.store.getSelectedAccount();
+    this.accountLabelText = account !== null ? account.username : '未登录';
+  }
+
+  private refreshStatus(): void {
+    this.statusText = `${this.store.installations.length} 个实例 · ${this.store.accounts.length} 个账户`;
+  }
 
   build() {
     Column() {
@@ -133,7 +179,7 @@ struct Index {
           .fontSize(11)
           .fontColor(HmclTheme.ON_SURFACE_VARIANT)
           .width('100%');
-        Text(this.accountLabel())
+        Text(this.accountLabelText)
           .fontSize(13)
           .fontWeight(FontWeight.Medium)
           .fontColor(HmclTheme.ON_SURFACE)
@@ -155,14 +201,6 @@ struct Index {
     .padding({ left: 10, right: 10, top: 12, bottom: 12 })
     .backgroundColor(HmclTheme.SURFACE_CONTAINER_LOW)
     .border({ width: { right: 1 }, color: HmclTheme.OUTLINE_VARIANT })
-  }
-
-  private accountLabel(): string {
-    const account = this.store.getSelectedAccount();
-    if (!account) {
-      return '未登录';
-    }
-    return account.username;
   }
 
   @Builder
@@ -195,7 +233,9 @@ struct Index {
         .fontSize(11)
         .fontColor(HmclTheme.ON_SURFACE_VARIANT);
       Blank();
-      Text(this.summaryLabel())
+      Text(this.statusText.length > 0
+        ? this.statusText
+        : `${this.store.installations.length} 个实例 · ${this.store.accounts.length} 个账户`)
         .fontSize(11)
         .fontColor(HmclTheme.ON_SURFACE_VARIANT);
     }
@@ -206,8 +246,4 @@ struct Index {
     .border({ width: { top: 1 }, color: HmclTheme.OUTLINE_VARIANT })
   }
 
-  private summaryLabel(): string {
-    return this.store.installations.length.toString() + ' 个实例 · '
-      + this.store.accounts.length.toString() + ' 个账户';
-  }
 }
