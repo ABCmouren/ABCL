@@ -447,6 +447,70 @@ export class Logger {
     const start = Math.max(0, Logger.memBuffer.length - count);
     return Logger.memBuffer.slice(start).join('\n');
   }
+
+  /** 内存日志条数 */
+  static memoryCount(): number {
+    return Logger.memBuffer.length;
+  }
+
+  /** 清空内存缓冲（UI「清空」用） */
+  static clearMemory(): void {
+    Logger.memBuffer = [];
+    Logger.info('Logger', '--- 内存日志已清空 ---');
+  }
+
+  /** 日志文件所在目录 */
+  static dir(): string {
+    return Logger.logDir;
+  }
+
+  /** 列出历史日志文件（新 → 旧） */
+  static listFiles(): string[] {
+    if (!Logger.logDir || !FileUtils.exists(Logger.logDir)) {
+      return [];
+    }
+    const files = FileUtils.listDir(Logger.logDir)
+      .filter((f: string) => f.startsWith('hmcl_') && f.endsWith('.log'))
+      .sort()
+      .reverse();
+    return files;
+  }
+
+  /**
+   * 读某个日志文件的内容。
+   * 单文件可能很大，超过 maxBytes 时只取尾部（与 tail -f 语义一致）。
+   */
+  static readFile(name: string, maxBytes: number = 512 * 1024): string {
+    const path = `${Logger.logDir}/${name}`;
+    if (!FileUtils.exists(path)) {
+      return '';
+    }
+    const size = FileUtils.getFileSize(path);
+    if (size <= maxBytes) {
+      return FileUtils.readFile(path);
+    }
+    // 大文件：跳过前 (size - maxBytes) 字节，取尾部
+    const skip = size - maxBytes;
+    try {
+      const file = fs.openSync(path, fs.OpenMode.READ_ONLY);
+      try {
+        const buf = new ArrayBuffer(maxBytes);
+        fs.readSync(file.fd, buf, { offset: skip, length: maxBytes });
+        const decoder = util.TextDecoder.create('utf-8', { ignoreBOM: true });
+        return `...(已跳过前 ${skip} 字节)\n` + decoder.decodeToString(new Uint8Array(buf));
+      } finally {
+        fs.closeSync(file);
+      }
+    } catch (e) {
+      Logger.error('Logger', `读取日志 ${name} 失败`, e as Error);
+      return '';
+    }
+  }
+
+  /** 复制到剪贴板用的纯文本（去掉时间戳前缀里的控制字符） */
+  static toClipboard(name: string): string {
+    return Logger.readFile(name, 256 * 1024);
+  }
 }
 
 export class StringUtils {

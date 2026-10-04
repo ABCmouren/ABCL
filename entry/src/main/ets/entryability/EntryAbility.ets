@@ -5,6 +5,8 @@ import window from '@ohos.window';
 import resourceManager from '@ohos.resourceManager';
 import { BusinessError } from '@ohos.base';
 import { Logger, FileUtils } from '../core/util/Utils';
+import { GameDirectory } from '../core/game/GameDirectory';
+import { VersionManager } from '../core/game/VersionManager';
 import { LaunchEngine } from '../core/launch/LaunchEngine';
 import { JdkManager } from '../core/launch/JdkManager';
 import { JdkExtractor } from '../core/launch/JdkExtractor';
@@ -49,6 +51,13 @@ export default class EntryAbility extends UIAbility {
     prefsManager.setContext(context);
     await prefsManager.init(filesDir);
     Logger.info('EntryAbility', 'PreferencesManager initialized');
+
+    // 铺好完整的 .minecraft 骨架。
+    // 之前是「用到才建」，装完游戏只有 versions/libraries/assets，
+    // 用户想自己丢模组、光影、截图时不知道往哪放。
+    const mcDir = VersionManager.getInstance().getMinecraftDir();
+    GameDirectory.ensureSkeleton(mcDir);
+    Logger.info('EntryAbility', `游戏目录骨架：${mcDir}`);
 
     // Initialize the ModLoaderInstaller with base directory
     const modLoaderInstaller = ModLoaderInstaller.getInstance();
