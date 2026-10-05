@@ -126,10 +126,43 @@ export default struct GameListPage {
       if (this.showOptiFinePicker) {
         this.OptiFinePickerOverlay()
       }
+
+      // ⚠️ 之前 toastText 被写了 10 处却从没渲染过，
+      // 导致重命名/复制/隔离/导出/删���/OptiFine 安装
+      // 全都「点了没反应」，用户完全看不到任何反馈。
+      if (this.toastText.length > 0) {
+        this.ToastBar()
+      }
     }
     .width('100%')
     .height('100%')
     .backgroundColor(HmclTheme.SURFACE)
+  }
+
+  @Builder
+  ToastBar() {
+    Row() {
+      Text(this.toastText)
+        .fontSize(12)
+        .fontColor(Color.White)
+        .layoutWeight(1)
+        .maxLines(3);
+      Text('\u00d7')
+        .fontSize(15)
+        .fontColor(Color.White)
+        .padding({ left: 10, right: 2, top: 2, bottom: 2 })
+        .onClick(() => {
+          this.toastText = '';
+        });
+    }
+    .width('80%')
+    .constraintSize({ maxWidth: 620 })
+    .padding({ left: 14, right: 12, top: 10, bottom: 10 })
+    .backgroundColor('#CC2A2A2E')
+    .borderRadius(10)
+    .shadow({ radius: 12, color: '#55000000', offsetX: 0, offsetY: 4 })
+    .margin({ bottom: 90 })
+    .position({ x: '10%', y: '82%' });
   }
 
   @Builder
@@ -514,13 +547,25 @@ export default struct GameListPage {
   private async openOptiFine(inst: GameInstallation): Promise<void> {
     this.ofTarget = inst;
     this.ofVersions = [];
+    // 先做兼容性判定：主类不在 FORGE_OPTIFINE_MAIN 里的（Fabric / Quilt）装不了，
+    // 早点说清楚，别让用户点进去才发现。
+    if (!OptiFineInstaller.canInstall(GameDirectoryResolver.versionsDir(), inst)) {
+      this.toastText = OptiFineInstaller.describeCompatibility(
+        GameDirectoryResolver.versionsDir(), inst);
+      return;
+    }
     this.ofBusy = true;
-    const list = await OptiFineInstaller.fetchVersions(inst.gameVersion);
+    // ⚠️ 必须用 gameVersion（1.8.9）而不是 versionId（1.8.9-forge-11.15.1-1.8.9）——
+    // OptiFine 的接口路径是按纯 MC 版本组织的，
+    // 拿 versionId 去查会 404，表现就是「点了没反应」。
+    const mcVersion = inst.gameVersion.length > 0 ? inst.gameVersion : inst.versionId;
+    const list = await OptiFineInstaller.fetchVersions(mcVersion);
     this.ofVersions = list;
     this.ofBusy = false;
     this.showOptiFinePicker = true;
     if (list.length === 0) {
-      this.toastText = '没有找到 OptiFine ' + inst.gameVersion + ' 的版本';
+      this.toastText = '没有找到 OptiFine ' + mcVersion +
+        ' 的版本（OptiFine 对 1.20.5+ 等新版已不再更新）';
     }
   }
 

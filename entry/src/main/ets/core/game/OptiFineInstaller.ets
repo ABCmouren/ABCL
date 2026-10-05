@@ -40,6 +40,12 @@ export interface OptiFineRemoteVersion {
   displayName: string;
 }
 
+interface OptiFineVersionJson {
+  mainClass?: string;
+  id?: string;
+  inheritsFrom?: string;
+}
+
 interface BmclOptiFine {
   mcversion?: string;
   type?: string;
@@ -49,6 +55,85 @@ interface BmclOptiFine {
 
 export class OptiFineInstaller {
   private static readonly TAG = 'OptiFineInstaller';
+
+  /**
+   * 允许在其上叠加 OptiFine 的主类集合。
+   * 对应 HMCL 的 GameComponentAnalyzer.FORGE_OPTIFINE_MAIN。
+   *
+   * 关键点：Forge 实例的主类 BootstrapLauncher 也在这个集合里，
+   * 所以「Forge + OptiFine」是允许的 —— 但不是简单把原版 jar 喂给 Patcher，
+   * 而是要在 Forge 已装好的实例上叠加（HMCL 由 ForgeInstallTask 校验主类合法性）。
+   */
+  private static readonly FORGE_OPTIFINE_MAIN: string[] = [
+    'net.minecraft.client.main.Main',
+    'net.minecraft.launchwrapper.Launch',
+    'net.minecraft.launchwrapper.LaunchClassLoader',
+    'net.minecraft.client.launcher.Launcher',
+    'net.minecraft.bootstraplauncher.BootstrapLauncher',
+    'cpw.mods.bootstraplauncher.BootstrapLauncher',
+    'cpw.mods.bootstraplauncher.BootLauncher',
+    'net.neoforged.bootstraplauncher.BootstrapLauncher',
+    'net.minecraftforge.bootstraplauncher.BootstrapLauncher'
+  ];
+
+  /** 读版本 json 里的 inheritsFrom（没有则空串） */
+  static readInheritsFrom(versionsDir: string, versionId: string): string {
+    const json = versionsDir + '/' + versionId + '/' + versionId + '.json';
+    if (!FileUtils.exists(json)) {
+      return '';
+    }
+    try {
+      const data = JSON.parse(FileUtils.readFile(json)) as OptiFineVersionJson;
+      return data.inheritsFrom !== undefined ? data.inheritsFrom : '';
+    } catch (e) {
+      return '';
+    }
+  }
+
+  /** 读版本 json 里的 mainClass（缺失时按原版算） */
+  static readMainClass(versionsDir: string, versionId: string): string {
+    const json = versionsDir + '/' + versionId + '/' + versionId + '.json';
+    if (!FileUtils.exists(json)) {
+      return 'net.minecraft.client.main.Main';
+    }
+    try {
+      const data = JSON.parse(FileUtils.readFile(json)) as OptiFineVersionJson;
+      return data.mainClass !== undefined && data.mainClass.length > 0
+        ? data.mainClass
+        : 'net.minecraft.client.main.Main';
+    } catch (e) {
+      return 'net.minecraft.client.main.Main';
+    }
+  }
+
+  /**
+   * 这个实例能不能装 OptiFine。
+   * 主类不在 FORGE_OPTIFINE_MAIN 里就装不了 ——
+   * 例如 Fabric / Quilt 的主类是 net.fabricmc.Launch / org.quiltmc.loader.impl.launch.knot.KnotClient，
+   * 叠 OptiFine 没有意义（对应 HMCL 的 UNSUPPORTED_LAUNCH_WRAPPER）。
+   */
+  static canInstall(versionsDir: string, inst: GameInstallation): boolean {
+    const mainClass = OptiFineInstaller.readMainClass(versionsDir, inst.versionId);
+    return OptiFineInstaller.FORGE_OPTIFINE_MAIN.indexOf(mainClass) >= 0;
+  }
+
+  /** 当前实例是否已装 OptiFine（看版本 id 里的标记） */
+  static isInstalled(inst: GameInstallation): boolean {
+    return inst.versionId.indexOf('-optifine_') >= 0;
+  }
+
+  /** 读取实例信息供 UI 展示判定结果 */
+  static describeCompatibility(versionsDir: string, inst: GameInstallation): string {
+    if (OptiFineInstaller.isInstalled(inst)) {
+      return '已安装 OptiFine';
+    }
+    if (!OptiFineInstaller.canInstall(versionsDir, inst)) {
+      const mc = OptiFineInstaller.readMainClass(versionsDir, inst.versionId);
+      return '当前实例（主类 ' + mc + '）不支持叠加 OptiFine';
+    }
+    return '';
+  }
+
 
   private static toLookupVersion(v: string): string {
     if (v === '1.8') { return '1.8.0'; }
@@ -297,11 +382,47 @@ export class OptiFineInstaller {
     nativeRunner: (installerJar: string, vanillaJar: string, outputJar: string) => Promise<boolean>,
   ): Promise<GameInstallation> {
     const mcDir = GameDirectoryResolver.contentRoot(inst);
-    const vanillaJar = GameDirectoryResolver.versionsDir() + '/' + remote.gameVersion +
-      '/' + remote.gameVersion + '.jar';
-    if (!FileUtils.exists(vanillaJar)) {
-      throw new Error('找不到原版 jar：' + vanillaJar +
-        '，请先安装 Minecraft ' + remote.gameVersion);
+    const versionsDir = GameDirectoryResolver.versionsDir();
+
+    // 主类必须落在 FORGE_OPTIFINE_MAIN 里，否则不能装（对齐 HMCL 的
+    // UNSUPPORTED_LAUNCH_WRAPPER 校验）。Fabric/Quilt 实例会被这里挡掉。
+    const mainClass = OptiFineInstaller.readMainClass(versionsDir, inst.versionId);
+    if (OptiFineInstaller.FORGE_OPTIFINE_MAIN.indexOf(mainClass) < 0) {
+      throw new Error('当前实例主类为 ' + mainClass +
+        '，不支持叠加 OptiFine（仅原版 / Forge / NeoForge 可以）');
+    }
+
+    // ⚠️ Patcher 的输入必须是「这个实例实际要启动的那个 jar」。
+    // 原版实例 → versions/<mc>/<mc>.jar
+    // Forge 实例 → versions/<实例id>/<实例id>.jar（Forge 已替换过内容），
+    // 若误用原版 jar 会打出一个根本不含 Forge 代码的产物 ——
+    // 这正是「装了 Forge 的版本无法装 OptiFine」的根因。
+    // 逐级回退：实例 jar → inheritsFrom 的版本 jar → 原版 jar。
+    // 实测 Forge 实例目录可能只有 .json 没有 .jar（processors 未跑完或被跳过），
+    // 这时若直接报错「找不到 jar」用户会一头雾水，所以回退到基础版本。
+    const candidates: string[] = [];
+    candidates.push(versionsDir + '/' + inst.versionId + '/' + inst.versionId + '.jar');
+    // Forge 等实例通过 inheritsFrom 指向基础版本，基础 jar 才是有效的 Patcher 输入
+    const base = OptiFineInstaller.readInheritsFrom(versionsDir, inst.versionId);
+    if (base.length > 0) {
+      candidates.push(versionsDir + '/' + base + '/' + base + '.jar');
+    }
+    candidates.push(versionsDir + '/' + remote.gameVersion + '/' + remote.gameVersion + '.jar');
+
+    let vanillaJar = '';
+    for (const c of candidates) {
+      if (FileUtils.exists(c) && FileUtils.getFileSize(c) > 0) {
+        vanillaJar = c;
+        break;
+      }
+    }
+    if (vanillaJar.length === 0) {
+      throw new Error('找不到可用于打补丁的 jar（试过 ' + candidates.length +
+        ' 个位置），请先装好 Minecraft ' + remote.gameVersion);
+    }
+    if (vanillaJar !== candidates[0]) {
+      Logger.warn(OptiFineInstaller.TAG,
+        '实例自身没有 jar，改用 ' + vanillaJar + ' 作为 Patcher 输入');
     }
 
     const libsRoot = GameDirectoryResolver.librariesDir() + '/optifine';
@@ -381,6 +502,18 @@ export class OptiFineInstaller {
       FileUtils.writeFile(versionDir + '/optifine.install.json',
         OptiFineInstaller.buildPatcherJson(mavenVersion, extraLibs));
 
+      // ⚠️ 必须写 <versionId>.json —— VersionManager.getLocalVersions()
+      // 只认 versions/<dir>/<dir>.json 来发现实例。
+      // 之前只写了 optifine.install.json，装完的 OptiFine 在实例列表里根本不出现。
+      //
+      // Forge 实例要 inheritsFrom 它的 Forge 版本：
+      // 这样 libraries / mainClass 全部沿用 Forge 的，
+      // 只有 game arguments 追加 --tweakClass optifine.OptiFineTweaker。
+      FileUtils.writeFile(versionDir + '/' + versionId + '.json',
+        OptiFineInstaller.buildVersionJson(
+          versionId, remote.gameVersion, mavenVersion, extraLibs,
+          inst.versionId));
+
       const patched: GameInstallation = {
         versionId: versionId,
         name: inst.name,
@@ -406,6 +539,60 @@ export class OptiFineInstaller {
     } finally {
       FileUtils.delete(tmpDir);
     }
+  }
+
+  /**
+   * 生成 <versionId>.json。
+   *
+   * @param inheritFromBase true 表示这是叠加在 Forge 等实例之上的版本，
+   *        需要 inheritsFrom 指向基础实例以继承其 libraries 与 mainClass
+   */
+  private static buildVersionJson(
+    versionId: string,
+    gameVersion: string,
+    mavenVersion: string,
+    extraLibs: string[],
+    inheritFrom: string
+  ): string {
+    const q = OptiFineInstaller.jsonString;
+    const libNames: string[] = ['optifine:OptiFine:' + mavenVersion];
+    for (const l of extraLibs) {
+      libNames.push(l);
+    }
+    const libParts: string[] = [];
+    for (const n of libNames) {
+      libParts.push('{' + q('name') + ':' + q(n) + '}');
+    }
+    const gameArgs: string[] = [
+      '--tweakClass', 'optifine.OptiFineTweaker',
+      '--versionType', 'optifine',
+      '--version', mavenVersion
+    ];
+    const argParts: string[] = [];
+    for (const a of gameArgs) {
+      argParts.push(q(a));
+    }
+    let s = '{';
+    s += q('id') + ':' + q(versionId) + ',';
+    // 与基础版本不同（Forge / NeoForge 实例）才需要继承；
+    // 原版实例 id 相同，自继承没有意义。
+    if (inheritFrom !== versionId) {
+      s += q('inheritsFrom') + ':' + q(inheritFrom) + ',';
+    }
+    s += q('releaseTime') + ':' + q(OptiFineInstaller.now()) + ',';
+    s += q('type') + ':' + q('release') + ',';
+    s += q('mainClass') + ':' + q('net.minecraft.launchwrapper.Launch') + ',';
+    s += q('libraries') + ':[' + libParts.join(',') + '],';
+    s += q('arguments') + ':{' + q('game') + ':[' + argParts.join(',') + ']}';
+    s += '}';
+    return s;
+  }
+
+  private static now(): string {
+    const d = new Date();
+    const p2 = (n: number): string => n < 10 ? ('0' + n) : n.toString();
+    return d.getFullYear() + '-' + p2(d.getMonth() + 1) + '-' + p2(d.getDate()) +
+      'T' + p2(d.getHours()) + ':' + p2(d.getMinutes()) + ':' + p2(d.getSeconds()) + 'Z';
   }
 
   /** 生成 optifine.install.json（HMCL 的 GameInstancePatch 等价物） */

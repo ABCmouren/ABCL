@@ -56,13 +56,21 @@ export class VersionManager {
       if (FileUtils.exists(versionJson)) {
         try {
           const data: GameVersionJson = JSON.parse(FileUtils.readFile(versionJson));
+          const loaderType = this.detectModLoaderType(dir);
+          // ⚠️ gameVersion 之前直接取 data.id，但 Forge/NeoForge/Fabric 实例的
+          // id 就是自己的版本目录名（如 1.8.9-forge-11.15.1.2318-1.8.9），
+          // 真正的 Minecraft 版本在 inheritsFrom（1.8.9）。
+          // 于是所有按 MC 版本查询的地方（OptiFine 版本列表、Java 版本选择、
+          // 依赖库下载）全都拿到错的值 ——
+          // 表现就是「装了 Forge 的版本找不到 OptiFine」。
+          const mcVersion = this.resolveMinecraftVersion(versionsDir, dir, data);
           const installation: GameInstallation = {
             versionId: dir,
             name: dir,
             directory: `${versionsDir}/${dir}`,
-            gameVersion: data.id,
-            loaderType: this.detectModLoaderType(dir),
-            loaderVersion: '',
+            gameVersion: mcVersion,
+            loaderType: loaderType,
+            loaderVersion: this.resolveLoaderVersion(dir),
             installed: true,
             installTime: 0,
             lastPlayed: 0,
@@ -84,6 +92,84 @@ export class VersionManager {
 
     this.store.setInstallations(installations);
     return installations;
+  }
+
+  /**
+   * 沿 inheritsFrom 链向上找，找到纯 Minecraft 版本目录名。
+   * 原版实例没有 inheritsFrom，id 本身就是 MC 版本。
+   */
+  private resolveMinecraftVersion(versionsDir: string, dir: string, data: GameVersionJson): string {
+    let cur = data.inheritsFrom !== undefined && data.inheritsFrom.length > 0
+      ? data.inheritsFrom
+      : '';
+    const seen: Set<string> = new Set([dir]);
+    let hops = 0;
+    while (cur.length > 0 && hops < 8) {
+      if (seen.has(cur)) {
+        break;
+      }
+      seen.add(cur);
+      hops++;
+      // 目录名看起来就是纯 MC 版本（1.8.9 / 26.3），直接用
+      if (this.looksLikeMinecraftVersion(cur)) {
+        return cur;
+      }
+      const parentJson = `${versionsDir}/${cur}/${cur}.json`;
+      if (!FileUtils.exists(parentJson)) {
+        break;
+      }
+      try {
+        const parent: GameVersionJson = JSON.parse(FileUtils.readFile(parentJson));
+        cur = parent.inheritsFrom !== undefined ? parent.inheritsFrom : '';
+      } catch (e) {
+        break;
+      }
+    }
+    // 兜底：从目录名里剥掉加载器后缀，如 1.8.9-forge-11.15.1-1.8.9 → 1.8.9
+    return this.stripLoaderSuffix(dir);
+  }
+
+  /** 目录名是否像纯 MC 版本（不含量化器/加载器标记） */
+  private looksLikeMinecraftVersion(dir: string): boolean {
+    const lower = dir.toLowerCase();
+    if (lower.indexOf('forge') >= 0 || lower.indexOf('fabric') >= 0 ||
+      lower.indexOf('quilt') >= 0 || lower.indexOf('neoforge') >= 0 ||
+      lower.indexOf('optifine') >= 0 || lower.indexOf('liteloader') >= 0) {
+      return false;
+    }
+    return true;
+  }
+
+  /** 从版本目录名里剥掉加载器后缀 */
+  private stripLoaderSuffix(dir: string): string {
+    const patterns: string[] = [
+      '-neoforge-', '-forge-', '-fabric-', '-quilt-', '-optifine_', '-liteloader-'
+    ];
+    for (const p of patterns) {
+      const idx = dir.toLowerCase().indexOf(p);
+      if (idx > 0) {
+        return dir.substring(0, idx);
+      }
+    }
+    return dir;
+  }
+
+  /** 从目录名里取加载器版本（如 11.15.1.2318） */
+  private resolveLoaderVersion(dir: string): string {
+    const lower = dir.toLowerCase();
+    const patterns: string[] = [
+      '-neoforge-', '-forge-', '-quilt-', '-fabric-'
+    ];
+    for (const p of patterns) {
+      const idx = lower.indexOf(p);
+      if (idx > 0) {
+        const tail = dir.substring(idx + p.length);
+        // forge 的尾巴形如 11.15.1.2318-1.8.9，取最后一段之前的部分
+        const dash = tail.lastIndexOf('-');
+        return dash > 0 ? tail.substring(0, dash) : tail;
+      }
+    }
+    return '';
   }
 
   // Detect mod loader type from version directory
