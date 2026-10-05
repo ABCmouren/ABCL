@@ -122,6 +122,10 @@ export default struct GameListPage {
       if (this.menuVisible) {
         this.RowMenu()
       }
+
+      if (this.showOptiFinePicker) {
+        this.OptiFinePickerOverlay()
+      }
     }
     .width('100%')
     .height('100%')
@@ -539,19 +543,125 @@ export default struct GameListPage {
       const patched = await OptiFineInstaller.install(this.ofTarget, remote,
         async (installerJar: string, vanillaJar: string, outputJar: string) => {
           const logFile = Constants.appDir + '/logs/optifine-patcher.log';
+          Logger.info('GameListPage', '运行 OptiFine Patcher：jdk=' + jdk.name);
           const code = await ProcessorRunner.runJava(
             jdk.path, installerJar, 'optifine.Patcher',
             [vanillaJar, installerJar, outputJar], Constants.appDir, logFile);
+          if (code !== 0) {
+            Logger.error('GameListPage', 'Patcher 退出码 ' + code + ' 日志：' + logFile);
+          }
           return code === 0;
         });
       this.store.addInstallation(patched);
       this.toastText = 'OptiFine ' + remote.selfVersion + ' 安装完成';
       this.loadGames();
     } catch (e) {
-      this.toastText = 'OptiFine 安装失败：' + (e as Error).message;
-      Logger.error('GameListPage', 'OptiFine 安装失败', e as Error);
+      const msg = (e as Error).message;
+      // 区分「下载失败」与「Patcher 跑不起来」—— 后者通常是架构不匹配
+      if (msg.indexOf('Patcher') >= 0) {
+        this.toastText = 'OptiFine 的 Patcher 无法运行：' + msg +
+          '。内置 JDK 是 arm64 版，若当前跑在 x86 模拟器上则无法加载，' +
+          '请在 arm64 真机上安装；详见 logs/optifine-patcher.log';
+      } else {
+        this.toastText = 'OptiFine 安装失败：' + msg;
+      }
+      Logger.error('GameListPage', 'OptiFine 安装失败: ' + msg);
     }
     this.ofBusy = false;
+  }
+
+  /** OptiFine 版本选择弹层 */
+  @Builder
+  OptiFinePickerOverlay() {
+    Column() {
+      Row() {
+        Text(this.ofTarget ? ('OptiFine ' + this.ofTarget.gameVersion) : 'OptiFine')
+          .fontSize(16)
+          .fontWeight(FontWeight.Bold)
+          .fontColor(HmclTheme.ON_SURFACE)
+          .layoutWeight(1);
+        Text('关闭')
+          .fontSize(13)
+          .fontColor(HmclTheme.PRIMARY)
+          .onClick(() => {
+            this.showOptiFinePicker = false;
+          });
+      }
+      .width('100%')
+
+      if (this.ofBusy) {
+        Column() {
+          LoadingProgress()
+            .width(28)
+            .height(28)
+            .color(HmclTheme.PRIMARY_CONTAINER);
+          Text('正在获取 OptiFine 版本…')
+            .fontSize(12)
+            .fontColor(HmclTheme.ON_SURFACE_VARIANT)
+            .margin({ top: 10 });
+        }
+        .width('100%')
+        .layoutWeight(1)
+        .justifyContent(FlexAlign.Center);
+      } else if (this.ofVersions.length === 0) {
+        Column() {
+          Text('没有找到该版本的 OptiFine')
+            .fontSize(13)
+            .fontColor(HmclTheme.ON_SURFACE_VARIANT);
+          Text('OptiFine 对新版 Minecraft（如 1.20.5+）已不再更新，\n' +
+            '只有 1.8 ~ 1.12 等老版本才有。')
+            .fontSize(11)
+            .fontColor(HmclTheme.OUTLINE)
+            .textAlign(TextAlign.Center)
+            .margin({ top: 8 });
+        }
+        .width('100%')
+        .layoutWeight(1)
+        .justifyContent(FlexAlign.Center);
+      } else {
+        List() {
+          ForEach(this.ofVersions, (v: OptiFineRemoteVersion) => {
+            ListItem() {
+              Row() {
+                Column() {
+                  Text(v.displayName)
+                    .fontSize(14)
+                    .fontColor(HmclTheme.ON_SURFACE);
+                  if (v.isPre) {
+                    Text('预发布版本，可能不稳定')
+                      .fontSize(10)
+                      .fontColor(HmclTheme.TERTIARY)
+                      .margin({ top: 2 });
+                  }
+                }
+                .layoutWeight(1);
+                Text('安装')
+                  .fontSize(12)
+                  .fontColor(HmclTheme.ON_PRIMARY_CONTAINER)
+                  .backgroundColor(HmclTheme.PRIMARY_CONTAINER)
+                  .borderRadius(8)
+                  .padding({ left: 14, right: 14, top: 6, bottom: 6 })
+                  .onClick(() => {
+                    void this.installOptiFine(v);
+                  });
+              }
+              .width('100%')
+              .height(52)
+              .padding({ left: 18, right: 18 });
+            }
+          }, (v: OptiFineRemoteVersion) => v.selfVersion)
+        }
+        .width('100%')
+        .layoutWeight(1)
+        .divider({ strokeWidth: 1, color: HmclTheme.OUTLINE_VARIANT });
+      }
+    }
+    .width(420)
+    .height(520)
+    .padding({ top: 18 })
+    .backgroundColor(HmclTheme.SURFACE_CONTAINER_LOW)
+    .borderRadius(HmclTheme.CARD_RADIUS)
+    .shadow({ radius: 24, color: '#33000000', offsetX: 0, offsetY: 8 });
   }
 
   private async deleteInstance(inst: GameInstallation): Promise<void> {

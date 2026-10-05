@@ -10,6 +10,9 @@
 #include <cstdlib>
 #include <cstdio>
 #include <cerrno>
+#include <vector>
+#include <string>
+#include <sys/stat.h>
 
 namespace hmcl {
 
@@ -27,7 +30,42 @@ int childRun(const std::string &javaHome,
     std::string serverDir = libDir + "/server";
 
     setenv("JAVA_HOME", javaHome.c_str(), 1);
-    std::string ld = serverDir + ":" + libDir;
+    // LD_LIBRARY_PATH 必须包含 libjvm.so 所在目录及其依赖（libjava.so、libjli.so、
+    // libstdc++ 等）的目录，否则 dlopen 会报
+    // "Error loading shared library …: No such file or directory" ——
+    // 这条信息具有误导性，实际是依赖链里某个 .so 找不到，不是 libjvm.so 本身缺失。
+    //
+    // jdk8 的 libjvm 在 lib/aarch64/server/ 下，它依赖同级的
+    // lib/aarch64/libjava.so、lib/aarch64/jli/*.so，
+    // 所以要把架构目录也加进去。
+    const char *archEnv[] = {"aarch64", "arm64-v8a", "x86_64", nullptr};
+    std::vector<std::string> ldParts;
+    ldParts.push_back(serverDir);
+    ldParts.push_back(libDir);
+    for (int i = 0; archEnv[i] != nullptr; i++) {
+        std::string a = std::string(archEnv[i]);
+        std::string archDir = libDir + "/" + a;
+        struct stat st;
+        if (stat(archDir.c_str(), &st) == 0) {
+            ldParts.push_back(archDir);
+            ldParts.push_back(archDir + "/server");
+            ldParts.push_back(archDir + "/jli");
+            // jdk8 还有一层 jre/lib
+            ldParts.push_back(javaHome + "/jre/lib/" + a);
+            ldParts.push_back(javaHome + "/jre/lib/" + a + "/server");
+            ldParts.push_back(javaHome + "/jre/lib/" + a + "/jli");
+        }
+    }
+    ldParts.push_back(javaHome + "/jre/lib");
+    ldParts.push_back(javaHome + "/jre/lib/server");
+
+    std::string ld;
+    for (size_t i = 0; i < ldParts.size(); i++) {
+        if (i > 0) {
+            ld += ":";
+        }
+        ld += ldParts[i];
+    }
     const char *oldLd = getenv("LD_LIBRARY_PATH");
     if (oldLd && oldLd[0]) {
         ld += ":";
@@ -36,16 +74,66 @@ int childRun(const std::string &javaHome,
     setenv("LD_LIBRARY_PATH", ld.c_str(), 1);
     setenv("LC_ALL", "en_US.UTF-8", 1);
 
-    std::string jvmPath = serverDir + "/libjvm.so";
-    void *handle = dlopen(jvmPath.c_str(), RTLD_NOW | RTLD_GLOBAL);
-    if (!handle) {
-        jvmPath = libDir + "/libjvm.so";
-        handle = dlopen(jvmPath.c_str(), RTLD_NOW | RTLD_GLOBAL);
+    // libjvm.so 的位置各版本不同，逐个尝试：
+    //   jdk17/21 → lib/server/libjvm.so、lib/libjvm.so
+    //   jdk8     → lib/aarch64/server/libjvm.so（带架构目录层级），
+    //              且可能在 jdk8/lib 下，也可能在 jdk8/jre/lib 下
+    // 原实现只试了前两种，jdk8 直接找不到（表现为 dlopen 失败返回 70）。
+    const char *arches[] = {"aarch64", "arm64-v8a", "x86_64", nullptr};
+    std::vector<std::string> candidates;
+    candidates.push_back(serverDir + "/libjvm.so");
+    candidates.push_back(libDir + "/libjvm.so");
+    candidates.push_back(javaHome + "/jre/lib/server/libjvm.so");
+    candidates.push_back(javaHome + "/jre/lib/libjvm.so");
+    for (int i = 0; arches[i] != nullptr; i++) {
+        std::string a = std::string(arches[i]);
+        candidates.push_back(libDir + "/" + a + "/server/libjvm.so");
+        candidates.push_back(javaHome + "/jre/lib/" + a + "/server/libjvm.so");
+    }
+
+    std::string jvmPath;
+    void *handle = nullptr;
+    // 先用 stat 过滤不存在的路径，减少无谓的 dlopen；
+    // 但 stat 失败也不代表一定不存在（沙箱下偶发），
+    // 所以过滤后若一个都没命中，再对全部候选裸试一次。
+    std::vector<std::string> existing;
+    for (size_t i = 0; i < candidates.size(); i++) {
+        struct stat st;
+        if (stat(candidates[i].c_str(), &st) == 0) {
+            existing.push_back(candidates[i]);
+        }
+    }
+    if (existing.empty()) {
+        existing = candidates;
+    }
+
+    std::string lastError;
+    for (size_t i = 0; i < existing.size(); i++) {
+        handle = dlopen(existing[i].c_str(), RTLD_NOW | RTLD_GLOBAL);
+        if (handle) {
+            jvmPath = existing[i];
+            break;
+        }
+        const char *err = dlerror();
+        if (err != nullptr) {
+            lastError = std::string(err);
+        }
     }
     if (!handle) {
-        fprintf(stderr, "[java_tool] dlopen libjvm.so failed: %s\n", dlerror() ? dlerror() : "unknown");
+        fprintf(stderr, "[java_tool] dlopen libjvm.so failed under %s (%zu candidates)\n",
+                javaHome.c_str(), existing.size());
+        fprintf(stderr, "[java_tool]   last error: %s\n", lastError.c_str());
+        for (size_t i = 0; i < existing.size(); i++) {
+            fprintf(stderr, "[java_tool]   try: %s\n", existing[i].c_str());
+        }
+        // 架构不匹配是本项目最常见的失败原因：内置 JDK 全是 aarch64 的，
+        // 在 x86 模拟器上 dlopen 必然失败（与 Forge processors 同一原因）。
+        // 这里直接说明，避免把环境问题误判成路径问题。
+        fprintf(stderr, "[java_tool]   提示：内置 JDK 为 aarch64；若当前是 x86 模拟器则无法加载，\n"
+                        "[java_tool]   需在 arm64 真机上运行。\n");
         return 70;
     }
+    fprintf(stderr, "[java_tool] libjvm loaded from %s\n", jvmPath.c_str());
     CreateJavaVM_t create = (CreateJavaVM_t) dlsym(handle, "JNI_CreateJavaVM");
     if (!create) {
         fprintf(stderr, "[java_tool] JNI_CreateJavaVM not found\n");

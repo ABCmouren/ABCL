@@ -115,6 +115,27 @@ export class FileUtils {
   }
 
   /** 读整个文件为字节（导出到用户可见位置用） */
+  /** 读文件开头若干字符（判断 zip 魔数 PK 等） */
+  static readFileHead(path: string, bytes: number): string {
+    try {
+      const file = fs.openSync(path, fs.OpenMode.READ_ONLY);
+      try {
+        const buf = new ArrayBuffer(bytes);
+        const read = fs.readSync(file.fd, buf, { offset: 0, length: bytes });
+        const u8 = new Uint8Array(buf);
+        let s = '';
+        for (let i = 0; i < read; i++) {
+          s += String.fromCharCode(u8[i]);
+        }
+        return s;
+      } finally {
+        fs.closeSync(file);
+      }
+    } catch (e) {
+      return '';
+    }
+  }
+
   static readFileBytes(path: string): Uint8Array | null {
     try {
       if (!FileUtils.exists(path)) {

@@ -7,7 +7,7 @@
 	},
 	"BuildOptions":{
 		"SELECT_BUILD_PRODUCT":"default",
-		"BUNDLE_NAME":"com.hmcl.launcher",
+		"BUNDLE_NAME":"com.abcmouren.abcl",
 		"BUILD_PATH":{
 			"OUTPUT_PATH":"C:\\xm\\HMCL-HarmonyOS\\build\\outputs\\default"
 		},

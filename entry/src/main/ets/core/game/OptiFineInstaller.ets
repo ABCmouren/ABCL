@@ -122,33 +122,79 @@ export class OptiFineInstaller {
       ('OptiFine_' + lookup + '_' + selfVersion + '.jar');
     const urls: string[] = [];
     if (DownloadSettings.useMirror()) {
-      // HMCL 的 mirror 规则是 {bmcl}/optifine/{mc}/{type}/{patch}，不带文件名；
-      // 实测 BMCLAPI 会 302 到 /maven/com/optifine/… 再跳 CDN。
-      urls.push(Mirrors.BMCLAPI_ORIGIN + '/optifine/' + lookup + '/' + selfVersion);
+      // BMCLAPI 的下载路径是 {bmcl}/optifine/{mc}/{type}/{patch} —— 两级！
+      // selfVersion 形如 HD_U_I7，要拆成 HD_U + I7。
+      // 拼成一级（…/{mc}/HD_U_I7）实测 404，两级才 302。
+      const seg = OptiFineInstaller.splitTypePatch(selfVersion);
+      if (seg !== '') {
+        urls.push(Mirrors.BMCLAPI_ORIGIN + '/optifine/' + lookup + '/' + seg);
+      }
       urls.push(Mirrors.BMCLAPI_ORIGIN + '/maven/com/optifine/' + lookup + '/' + file);
     }
     urls.push('https://optifine.net/download?filename=' + encodeURIComponent(file));
     return urls;
   }
 
+  /** 把 HD_U_I7 拆成 HD_U/I7；已经是两级形式则原样返回 */
+  private static splitTypePatch(selfVersion: string): string {
+    // 从右往左找最后一段 patch（通常是 I7 / H8 / G5 这种大写字母+数字）
+    const idx = selfVersion.lastIndexOf('_');
+    if (idx <= 0 || idx === selfVersion.length - 1) {
+      return '';
+    }
+    const patch = selfVersion.substring(idx + 1);
+    if (!/^[A-Za-z]+\\d+$/.test(patch)) {
+      return '';
+    }
+    return selfVersion.substring(0, idx) + '/' + patch;
+  }
+
   static async downloadInstaller(remote: OptiFineRemoteVersion, targetDir: string): Promise<string> {
     FileUtils.mkdirs(targetDir);
-    const name = "OptiFine-" + remote.gameVersion + "_" + remote.selfVersion + "-installer.jar";
-    const target = targetDir + "/" + name;
-    if (FileUtils.exists(target) && FileUtils.getFileSize(target) > 0) {
+    const name = 'OptiFine-' + remote.gameVersion + '_' + remote.selfVersion + '-installer.jar';
+    const target = targetDir + '/' + name;
+    if (OptiFineInstaller.isValidJar(target)) {
       return target;
+    }
+    // 上次失败可能留下 44 字节的 HTML 残片（'Error. Please contact…'），
+    // 不清掉的话下次会被当成已下载直接跳过。
+    if (FileUtils.exists(target)) {
+      Logger.info(OptiFineInstaller.TAG, '清理上次失败的残留文件 ' + target);
+      FileUtils.delete(target);
     }
     for (const u of remote.urls) {
       try {
         const outcome = await HttpClient.downloadToFile(u, target, 0,
-          undefined, true, OptiFineInstaller.headers());
-        if (outcome.success) { return target; }
+          undefined, false, OptiFineInstaller.headers());
+        if (outcome.success && OptiFineInstaller.isValidJar(target)) {
+          Logger.info(OptiFineInstaller.TAG, 'installer 下载完成：' + target);
+          return target;
+        }
         Logger.warn(OptiFineInstaller.TAG, '下载失败 ' + u);
+        if (FileUtils.exists(target)) {
+          FileUtils.delete(target);
+        }
       } catch (e) {
         Logger.warn(OptiFineInstaller.TAG, '下载异常 ' + u);
+        if (FileUtils.exists(target)) {
+          FileUtils.delete(target);
+        }
       }
     }
     return '';
+  }
+
+  /** jar 有效性：zip 魔数 PK\x03\x04 + 体积合理 + 不是 HTML 残片 */
+  private static isValidJar(path: string): boolean {
+    if (!FileUtils.exists(path)) {
+      return false;
+    }
+    const size = FileUtils.getFileSize(path);
+    if (size < 1024) {
+      return false;
+    }
+    const head = FileUtils.readFileHead(path, 4);
+    return head.length >= 2 && head.charCodeAt(0) === 0x50 && head.charCodeAt(1) === 0x4B;
   }
 
   static async identifyInstaller(installerPath: string): Promise<OptiFineRemoteVersion | null> {
