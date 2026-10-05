@@ -2,11 +2,11 @@
 
 > **Hello Minecraft! Launcher — 鸿蒙原生版**
 >
-> 在 HarmonyOS NEXT 上原生运行 Minecraft Java Edition
+> 在 HarmonyOS 上原生运行 Minecraft Java Edition（ARM64 设备）
 
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
-[![Platform: HarmonyOS NEXT](https://img.shields.io/badge/Platform-HarmonyOS%20NEXT-red.svg)](https://developer.huawei.com)
-[![API: 26+](https://img.shields.io/badge/API-26%2B-brightgreen.svg)](https://developer.huawei.com)
+[![Platform: HarmonyOS NEXT](https://img.shields.io/badge/Platform-HarmonyOS%20%7C%20ARM64-red.svg)](https://developer.huawei.com)
+[![API: 24+](https://img.shields.io/badge/API-24%2B-brightgreen.svg)](https://developer.huawei.com)
 [![Build: Hvigor](https://img.shields.io/badge/Build-Hvigor-9cf)](https://developer.huawei.com)
 
 > ⚠️ **免责声明：本项目未经充分测试，仍处于实验性阶段，如遇到问题请在 Issue 反馈。**
