@@ -187,6 +187,15 @@ export class Constants {
   static readonly JDK_17_RAWFILE = 'jdk17-ohos-full-v5.zip';
   static readonly JDK_21_RAWFILE = 'jdk21-ohos-full-v7.zip';
 
+  /**
+   * 设备兼容层 jar 的文件名。
+   *
+   * 它由 third_party/amcl-compat/ 的源码编译而来（见该目录说明与 build.sh），
+   * 负责鸿蒙设备上的图形兼容：替换系统类加载器并对特定类做字节码改写。
+   * native 侧按这个名字在 filesDir 下查找，找不到就禁用该层。
+   */
+  static readonly DEVICE_COMPAT_JAR = 'amcl-launcher.jar';
+
   // GLFW native lib for HarmonyOS（mc-ohos-resources 的 OHOS 构建）
   static readonly GLFW_LIB_NAME = 'libglfw.so';
   

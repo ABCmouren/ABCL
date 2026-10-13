@@ -165,10 +165,14 @@ GpuInfo JvmLauncher::getGpuInfo() {
 JavaVMOption* JvmLauncher::buildJvmOptions(const JvmOptions &opts, int &optCount) {
     // 组装 JVM 启动参数。
     //
-    // 这里只包含「启动器本身该做的事」：内存、GC、目录、编码、原生库路径、
-    // 以及 Minecraft / LWJGL / Forge 在 Linux 系内核上通用的兼容开关。
-    // 不依赖任何第三方启动器的类或属性 —— classpath 完全由引擎从版本 JSON
-    // 解析出的依赖列表构成，入口类是该方法解析出的 mainClass。
+    // 分两部分：
+    //   1) 启动核心自己的参数 —— 内存、GC、目录、编码、原生库路径、
+    //      以及 Minecraft / LWJGL / Forge 在 Linux 系内核上通用的开关。
+    //      classpath 完全由引擎从版本清单解析出的依赖构成。
+    //   2) 设备兼容层（vendored，来自 AMCL，GPL-3.0）—— 只有当它的 jar 确实
+    //      存在时才启用。它通过替换系统类加载器做字节码变换，修正鸿蒙 GPU
+    //      上的地形渲染。注意：一旦声明了 java.system.class.loader 却找不到
+    //      那个类，JNI_CreateJavaVM 会直接失败，所以这里必须先探测文件。
     std::vector<JavaVMOption> options;
 
     auto addOpt = [&](const std::string &opt) {
@@ -178,15 +182,20 @@ JavaVMOption* JvmLauncher::buildJvmOptions(const JvmOptions &opts, int &optCount
         options.push_back(vmOpt);
     };
 
+    // ---- 设备兼容层是否存在 ----
+    const std::string compatJar = opts.filesDir + "/amcl-launcher.jar";
+    struct stat compatStat;
+    const bool compatAvailable =
+        opts.deviceCompat && (stat(compatJar.c_str(), &compatStat) == 0);
+    if (opts.deviceCompat && !compatAvailable) {
+        logWarn("JvmLauncher", "device compat jar not found: " + compatJar);
+    }
+
     // ---- 内存 ----
     addOpt("-Xms" + std::to_string(opts.minMemory) + "m");
     addOpt("-Xmx" + std::to_string(opts.maxMemory) + "m");
 
     // ---- GC 与运行时 ----
-    // UseCompressedOops 关闭：OHOS 上 32 位压缩指针寻址会出问题
-    // UsePerfData 关闭：沙箱内没有 /tmp/hsperfdata 的写入约定
-    // DisableAttachMechanism 关闭：沙箱内不需要 attach
-    // ActiveProcessorCount 固定：容器/沙箱里 CPU 数探测常常不准
     addOpt("-XX:+UnlockExperimentalVMOptions");
     addOpt("-XX:+UseG1GC");
     addOpt("-XX:+UnlockDiagnosticVMOptions");
@@ -196,7 +205,6 @@ JavaVMOption* JvmLauncher::buildJvmOptions(const JvmOptions &opts, int &optCount
     addOpt("-XX:+DisablePrimordialThreadGuardPages");
     addOpt("-XX:ActiveProcessorCount=8");
     if (opts.jitEnabled) {
-        // 只跑到 C1：启动更快，容忍一些峰值性能损失
         addOpt("-XX:TieredStopAtLevel=1");
     }
 
@@ -205,7 +213,6 @@ JavaVMOption* JvmLauncher::buildJvmOptions(const JvmOptions &opts, int &optCount
     addOpt("-Dfile.encoding=UTF-8");
     addOpt("-Dsun.jnu.encoding=UTF-8");
     addOpt("-Djava.security.egd=file:/dev/./urandom");
-    // log4shell 缓解（Minecraft 依赖 log4j2）
     addOpt("-Dlog4j2.formatMsgNoLookups=true");
 
     // ---- 工作目录 ----
@@ -226,17 +233,14 @@ JavaVMOption* JvmLauncher::buildJvmOptions(const JvmOptions &opts, int &optCount
     addOpt("-Djava.home=" + m_javaHome);
 
     // ---- LWJGL / GLFW ----
-    // checkThread0 关闭：渲染线程与窗口线程不同一是 OHOS 上的常态
     addOpt("-Dorg.lwjgl.glfw.checkThread0=false");
     addOpt("-Dorg.lwjgl.shaderc.libname=shaderc");
     addOpt("-Dorg.lwjgl.spvc.libname=spirv-cross");
     addOpt("-Dorg.lwjgl.vulkan.libname=libvulkan.so");
 
     // ---- Forge / Mod 兼容 ----
-    // earlyprogresswindow 关闭：Forge 的早期进度窗依赖桌面 AWT
     addOpt("-Dfml.earlyprogresswindow=false");
     addOpt("-Dforge.enableGameTest=false");
-    // Sodium 的 issue 2561 检查在 OHOS 驱动上会误报
     addOpt("-Dsodium.checks.issue2561=false");
 
     if (opts.isFabric) {
@@ -246,18 +250,32 @@ JavaVMOption* JvmLauncher::buildJvmOptions(const JvmOptions &opts, int &optCount
         addOpt("-Dabcl.gamelang=" + opts.gameLanguage);
     }
 
+    // ---- 设备兼容层的开关 ----
+    // amcl.platform.ohos=true 是兼容层启用字节码变换的前置条件
+    // （见 AmclClassLoader 的 PLATFORM_COMPATIBILITY_ENABLED）。
+    // 这里沿用它的属性名：兼容层是它的代码，按它的契约传参。
+    if (compatAvailable) {
+        addOpt("-Damcl.platform.ohos=true");
+        addOpt("-Djava.system.class.loader=com.amcl.launcher.AmclClassLoader");
+    }
+
     // ---- classpath ----
-    // 只放引擎解析出的游戏依赖（libraries + 版本 jar）。
-    // 启动器自身不往这里塞任何 jar —— 入口由 mainClass 决定。
     std::string cp;
+    if (compatAvailable) {
+        cp = compatJar;
+    }
     for (size_t i = 0; i < opts.classpath.size(); i++) {
-        if (i > 0) {
+        if (cp.length() > 0) {
             cp += ":";
         }
         cp += opts.classpath[i];
     }
     addOpt("-Djava.class.path=" + cp);
-    logInfo("JvmLauncher", "classpath entries: " + std::to_string(opts.classpath.size()));
+    logInfo("JvmLauncher", "classpath entries: " +
+            std::to_string(opts.classpath.size() + (compatAvailable ? 1 : 0)));
+    appendLog(compatAvailable
+        ? "[ABCL] 设备兼容层：已启用（AmclClassLoader + 地形渲染适配）"
+        : "[ABCL] 设备兼容层：未启用（未找到 amcl-launcher.jar）");
 
     // ---- 用户自定义 JVM 参数 ----
     if (!opts.customJvmArgs.empty()) {
@@ -279,6 +297,7 @@ JavaVMOption* JvmLauncher::buildJvmOptions(const JvmOptions &opts, int &optCount
 
     return result;
 }
+
 bool JvmLauncher::createJvm(const JvmOptions &opts, JavaVMInitArgs &vmArgs) {
     logInfo("JvmLauncher", "Creating JVM...");
     
@@ -320,6 +339,62 @@ bool JvmLauncher::createJvm(const JvmOptions &opts, JavaVMInitArgs &vmArgs) {
     return true;
 }
 
+std::string JvmLauncher::escapeJson(const std::string &s) {
+    std::string result;
+    result.reserve(s.length());
+    for (char c : s) {
+        switch (c) {
+            case '"': result += "\\\""; break;
+            case '\\': result += "\\\\"; break;
+            case '\n': result += "\\n"; break;
+            case '\r': result += "\\r"; break;
+            case '\t': result += "\\t"; break;
+            default: result += c;
+        }
+    }
+    return result;
+}
+
+std::string JvmLauncher::buildLaunchConfigJson(const JvmOptions &opts) {
+    // 设备兼容层的启动配置（9 个字段，对应它的 LaunchConfig.parse()）。
+    // 只有兼容层读这个 JSON；本启动器的入口调用不走它。
+    // 键名必须逐字一致。
+    
+    std::ostringstream json;
+    json << "{";
+    
+    json << "\"mainClass\":\"" << escapeJson(opts.mainClass) << "\",";
+    
+    json << "\"classpath\":[";
+    for (size_t i = 0; i < opts.classpath.size(); i++) {
+        if (i > 0) json << ",";
+        json << "\"" << escapeJson(opts.classpath[i]) << "\"";
+    }
+    json << "],";
+    
+    json << "\"mcArgs\":[";
+    // Build standard Minecraft arguments
+    std::vector<std::string> mcArgs;
+    // Main MC args are passed to this array
+    mcArgs = opts.mcArgs;
+    for (size_t i = 0; i < mcArgs.size(); i++) {
+        if (i > 0) json << ",";
+        json << "\"" << escapeJson(mcArgs[i]) << "\"";
+    }
+    json << "],";
+    
+    json << "\"gameDir\":\"" << escapeJson(opts.gameDir) << "\",";
+    json << "\"mcDir\":\"" << escapeJson(opts.mcDir) << "\",";
+    json << "\"filesDir\":\"" << escapeJson(opts.filesDir) << "\",";
+    json << "\"assetsDir\":\"" << escapeJson(opts.assetsDir) << "\",";
+    json << "\"isForge\":" << (opts.isForge ? "true" : "false") << ",";
+    json << "\"isFabric\":" << (opts.isFabric ? "true" : "false");
+    
+    json << "}";
+    return json.str();
+}
+
+
 int JvmLauncher::invokeMainClass(const JvmOptions &opts) {
     logInfo("JvmLauncher", "Invoking main class: " + opts.mainClass);
 
@@ -327,6 +402,60 @@ int JvmLauncher::invokeMainClass(const JvmOptions &opts) {
         logError("JvmLauncher", "JNIEnv is null");
         return -1;
     }
+
+    // ============================================================
+    // 阶段 1：设备兼容层准备（vendored，来自 AMCL，GPL-3.0）
+    //
+    // 它把系统类加载器换成 AmclClassLoader 并做字节码变换，修正鸿蒙 GPU
+    // 上的地形渲染（TerrainCompatibility / TerrainHeap / TerrainStaging /
+    // TerrainRangeRetirement 等），另外做 Forge 的 fml.toml + splash.properties
+    // 预处理与 context ClassLoader 设置。
+    //
+    // 只调它的 prepare()，不调它的 main() —— 入口调用在阶段 2 由我们自己完成。
+    // 两者都必须在同一线程上，这是它的 ThreadLocal 契约。
+    // ============================================================
+    if (opts.deviceCompat) {
+        const std::string cfg = buildLaunchConfigJson(opts);
+        jclass compatCls = m_env->FindClass("com/amcl/launcher/AmclLauncher");
+        if (compatCls == nullptr) {
+            if (m_env->ExceptionCheck()) {
+                m_env->ExceptionClear();
+            }
+            logWarn("JvmLauncher", "device compat layer not reachable");
+            appendLog("[ABCL] 警告：设备兼容层不可用，按原版行为启动（地形渲染可能异常）");
+        } else {
+            jmethodID prepareM = m_env->GetStaticMethodID(
+                compatCls, "prepare", "(Ljava/lang/String;)V");
+            if (prepareM == nullptr) {
+                if (m_env->ExceptionCheck()) {
+                    m_env->ExceptionClear();
+                }
+                appendLog("[ABCL] 警告：设备兼容层缺少 prepare()，按原版行为启动");
+            } else {
+                jstring cfgArg = m_env->NewStringUTF(cfg.c_str());
+                appendLog("[ABCL] 设备兼容层：prepare() 开始");
+                m_env->CallStaticVoidMethod(compatCls, prepareM, cfgArg);
+                if (m_env->ExceptionCheck()) {
+                    m_env->ExceptionDescribe();
+                    m_env->ExceptionClear();
+                    logError("JvmLauncher", "compat prepare() failed");
+                    appendLog("[ABCL] 警告：设备兼容层 prepare() 失败，继续启动"
+                              "（地形渲染可能异常）");
+                } else {
+                    logInfo("JvmLauncher", "device compat layer prepared");
+                    appendLog("[ABCL] 设备兼容层：prepare() 完成");
+                }
+                if (cfgArg != nullptr) {
+                    m_env->DeleteLocalRef(cfgArg);
+                }
+            }
+            m_env->DeleteLocalRef(compatCls);
+        }
+    }
+
+    // ============================================================
+    // 阶段 2：调用游戏入口（本启动器自己的启动核心）
+    // ============================================================
 
     // JNI 的类名用 '/' 分隔
     std::string slashed;
@@ -340,11 +469,10 @@ int JvmLauncher::invokeMainClass(const JvmOptions &opts) {
     appendLog("[ABCL] classpath  : " + std::to_string(opts.classpath.size()) + " entries");
     appendLog("[ABCL] game args  : " + std::to_string(opts.mcArgs.size()) + " args");
 
-    // 直接从系统类加载器解析入口类。
-    // 我们不再改写 java.system.class.loader，所以这里拿到的是 JVM 默认的
-    // 应用类加载器，它读取 -Djava.class.path 指向的全部依赖。
+    // 从系统类加载器解析入口类。启用兼容层时它就是 AmclClassLoader，
+    // 因此这里加载到的类已经过它的字节码变换。
     jclass mainCls = m_env->FindClass(slashed.c_str());
-    if (!mainCls) {
+    if (mainCls == nullptr) {
         if (m_env->ExceptionCheck()) {
             m_env->ExceptionDescribe();
             m_env->ExceptionClear();
@@ -360,7 +488,7 @@ int JvmLauncher::invokeMainClass(const JvmOptions &opts) {
     }
 
     jmethodID mainMethod = m_env->GetStaticMethodID(mainCls, "main", "([Ljava/lang/String;)V");
-    if (!mainMethod) {
+    if (mainMethod == nullptr) {
         if (m_env->ExceptionCheck()) {
             m_env->ExceptionClear();
         }
@@ -370,7 +498,7 @@ int JvmLauncher::invokeMainClass(const JvmOptions &opts) {
     }
 
     jclass stringClass = m_env->FindClass("java/lang/String");
-    if (!stringClass) {
+    if (stringClass == nullptr) {
         if (m_env->ExceptionCheck()) {
             m_env->ExceptionClear();
         }
@@ -378,7 +506,7 @@ int JvmLauncher::invokeMainClass(const JvmOptions &opts) {
     }
 
     jobjectArray argsArray = m_env->NewObjectArray((jsize)opts.mcArgs.size(), stringClass, nullptr);
-    if (!argsArray) {
+    if (argsArray == nullptr) {
         if (m_env->ExceptionCheck()) {
             m_env->ExceptionClear();
         }
@@ -386,7 +514,7 @@ int JvmLauncher::invokeMainClass(const JvmOptions &opts) {
     }
     for (size_t i = 0; i < opts.mcArgs.size(); i++) {
         jstring argStr = m_env->NewStringUTF(opts.mcArgs[i].c_str());
-        if (!argStr) {
+        if (argStr == nullptr) {
             if (m_env->ExceptionCheck()) {
                 m_env->ExceptionClear();
             }
@@ -414,6 +542,7 @@ int JvmLauncher::invokeMainClass(const JvmOptions &opts) {
     appendLog("[ABCL] Minecraft exited normally");
     return 0;
 }
+
 int JvmLauncher::launch(const JvmOptions &opts) {
     logInfo("JvmLauncher", "Launching Minecraft...");
     setLaunchStatus(LaunchStatus::LAUNCHING);

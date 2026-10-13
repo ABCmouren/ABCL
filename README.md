@@ -19,8 +19,6 @@ ABCL 是 [HMCL](https://github.com/HMCL-dev/HMCL)（Hello Minecraft! Launcher）
 
 **启动核心是自研的。** 从版本清单 `<version>.json` 解析依赖、沿 `inheritsFrom` 链确定入口类、按加载器组装 JVM 参数与游戏参数、经 JNI 调用 `<mainClass>.main(String[])` —— 这条链路全部由本项目实现，**运行时不加载任何第三方启动器的类或 jar**。
 
-> 设计与排查过程中参考过 [AMCL](https://github.com/LZZLHY/amcl) 等鸿蒙 Minecraft 启动器的公开做法，功能与交互则对齐 [HMCL](https://github.com/HMCL-dev/HMCL)。这些只是**参考**，没有把它们的启动核心作为依赖引入。
-
 ### 上游资源依赖
 
 以下是从上游项目获取的**二进制/数据资源**，不属于启动核心：
@@ -28,7 +26,8 @@ ABCL 是 [HMCL](https://github.com/HMCL-dev/HMCL)（Hello Minecraft! Launcher）
 | 资源 | 说明 |
 |---|---|
 | JDK 运行时 | 来自 [`mc-ohos-resources`](https://github.com/LZZLHY/mc-ohos-resources) 的 GPL-2.0 构建（JDK 8 / 17 / 21），已打包进 HAP，避免上游撤包后无法使用 |
-| OHOS 兼容的 LWJGL / GLFW | 同上；预编译二进制，按 `ABCL_SURFACE_ID`（兼容别名 `AMCL_SURFACE_ID`）约定取得渲染 surface |
+| OHOS 兼容的 LWJGL / GLFW | 同上；预编译二进制，按 `ABCL_SURFACE_ID` 约定取得渲染 surface（另导出历史命名以兼容该预编译产物） |
+| 设备兼容层源码 | `third_party/amcl-compat/`，GPL-3.0 第三方源码，由本项目自行编译；见该目录内的说明 |
 | Forge/NeoForge processors | native 侧自研 `runJavaProcessor`，fork 子进程执行 installer 的 processor |
 | Maven / meta 端点 | NeoForge `/releases` 前缀、Fabric/Quilt 官方 meta API、BMCLAPI `/maven/` 镜像 |
 
@@ -331,7 +330,7 @@ HarmonyOS 兼容的 LWJGL 3.x 构建，包含 14 个 JAR 文件（~12MB），覆
 | Native Bridge (libhmcl_native.so) | ✅ 完成 | arm64-v8a + x86_64 双架构 |
 | JVM 创建与启动 | ✅ 完成 | dlopen → JNI_CreateJavaVM → `<mainClass>.main()`（自研启动核心） |
 | JDK 提取 (rawfile → sandbox) | ✅ 完成 | 支持 ZIP 解压 + 自动展平 |
-| LWJGL XComponent 绑定 | ✅ 完成 | 通过 ABCL_SURFACE_ID 环境变量（兼容 AMCL_SURFACE_ID） |
+| LWJGL XComponent 绑定 | ✅ 完成 | 通过 ABCL_SURFACE_ID 环境变量（另导出历史命名以兼容预编译 LWJGL） |
 | 模组加载器安装 | ✅ 完成 | Forge / NeoForge / Fabric / Quilt |
 | 设置持久化 | ✅ 完成 | `@ohos.data.preferences` 自动保存 |
 | 资源包下载 | ✅ 完成 | Asset index + objects 下载，BMCLAPI 镜像 |
@@ -345,7 +344,7 @@ HarmonyOS 兼容的 LWJGL 3.x 构建，包含 14 个 JAR 文件（~12MB），覆
 ## 🙏 致谢
 
 - **[HMCL](https://github.com/HMCL-dev/HMCL)** — 上游启动器项目，GPL-3.0 许可
-- **[AMCL](https://github.com/LZZLHY/amcl/releases)** — 鸿蒙原生 Minecraft 启动器；本项目在设计与排查时参考过它的公开实现与设备适配经验（**启动核心为自研，未引入其代码**）
+- **[AMCL](https://github.com/LZZLHY/amcl)** — 鸿蒙原生 Minecraft 启动器，本项目在设计与排查时参考过它
 - **[LZZLHY/mc-ohos-resources](https://github.com/LZZLHY/mc-ohos-resources)** — HarmonyOS 编译的 JDK 和 LWJGL 资源
 
 ---

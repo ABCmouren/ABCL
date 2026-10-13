@@ -9,8 +9,9 @@
  * 2. Set up environment (JAVA_HOME, LD_LIBRARY_PATH, etc.)
  * 3. Load libjvm.so via custom ELF loader (JIT bypass)
  * 4. Call JNI_CreateJavaVM
- * 5. Resolve the game main class from the version manifest
- * 6. Invoke <mainClass>.main(String[]) with the game arguments
+ * 5. Prepare the device compatibility layer (optional, vendored)
+ * 6. Resolve the game main class from the version manifest
+ * 7. Invoke <mainClass>.main(String[]) with the game arguments
  * 7. Monitor game process
  */
 
@@ -70,6 +71,9 @@ struct JvmOptions {
     bool jitEnabled = true;     // Use JIT (requires ELF loader)
     std::string customJvmArgs;
     std::string gameLanguage;   // Game language override
+    // 是否启用设备兼容层（vendored，来自 AMCL）。它替换系统类加载器做
+    // 字节码变换，修正鸿蒙 GPU 上的地形渲染。仅当 jar 存在时才真正生效。
+    bool deviceCompat = true;
 };
 
 // Callbacks for game lifecycle events
@@ -164,6 +168,8 @@ private:
     bool createJvm(const JvmOptions &opts, JavaVMInitArgs &vmArgs);
     JavaVMOption* buildJvmOptions(const JvmOptions &opts, int &optCount);
     int invokeMainClass(const JvmOptions &opts);
+    std::string buildLaunchConfigJson(const JvmOptions &opts);
+    std::string escapeJson(const std::string &s);
     void setLaunchStatus(LaunchStatus status);
 
     void appendLog(const std::string &line);

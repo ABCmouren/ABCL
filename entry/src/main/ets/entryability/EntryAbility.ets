@@ -77,6 +77,9 @@ export default class EntryAbility extends UIAbility {
     const launchEngine = LaunchEngine.getInstance();
     launchEngine.init(filesDir);
 
+    // 提取设备兼容层（缺失不致命：native 侧探测不到就以原版行为启动）
+    await EntryAbility.extractDeviceCompatJar(context.resourceManager, filesDir);
+
     // Extract LWJGL JARs in background (for OHOS compatibility)
     EntryAbility.extractLwjglJars(context.resourceManager, filesDir);
 
@@ -136,9 +139,32 @@ export default class EntryAbility extends UIAbility {
   }
 
   /**
-   * Extract essential runtime files from rawfile before any game launch.
-   * These files are required for JVM initialization and game launch.
+  /**
+   * 提取设备兼容层 jar（源码见 third_party/amcl-compat/）。
+   *
+   * 它替换系统类加载器并对特定类做字节码改写，以适配鸿蒙 GPU 上的地形渲染。
+   * 提取失败不阻断启动 —— native 侧探测不到文件就不启用这一层。
    */
+  private static async extractDeviceCompatJar(
+    mgr: resourceManager.ResourceManager,
+    filesDir: string,
+  ): Promise<void> {
+    const jarPath: string = `${filesDir}/${Constants.DEVICE_COMPAT_JAR}`;
+    if (FileUtils.exists(jarPath)) {
+      Logger.info('EntryAbility', 'device compat jar already in sandbox');
+      return;
+    }
+    Logger.info('EntryAbility', 'Extracting device compat jar from rawfile...');
+    const ok: boolean = await JdkExtractor.extractRawFile(
+      mgr, Constants.DEVICE_COMPAT_JAR, jarPath);
+    if (ok) {
+      Logger.info('EntryAbility', 'device compat jar extracted');
+    } else {
+      Logger.warn('EntryAbility',
+        'device compat jar not in rawfile; 将以原版行为启动（地形渲染可能异常）');
+    }
+  }
+
   /**
    * Extract LWJGL JARs from rawfile to lwjgl_jars/ directory.
    * These are the OHOS-compatible LWJGL builds that override

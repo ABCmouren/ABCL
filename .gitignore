@@ -37,3 +37,6 @@ build-profile.json5.local
 
 # IDE
 .idea/
+
+# 设备兼容层：由 third_party/amcl-compat/build.sh 从源码生成
+entry/src/main/resources/rawfile/amcl-launcher.jar
