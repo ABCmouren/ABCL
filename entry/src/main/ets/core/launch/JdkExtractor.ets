@@ -125,7 +125,7 @@ export class JdkExtractor {
 
   /**
    * Extract a single file (not ZIP) from rawfile to the target path.
-   * Used for amcl-launcher.jar, cacert.pem, etc.
+   * Used for cacert.pem, LWJGL jars, etc.
    */
   static async extractRawFile(
     mgr: resourceManager.ResourceManager,

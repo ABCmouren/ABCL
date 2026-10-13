@@ -1,7 +1,13 @@
 /**
  * HMCL Native Bridge - JVM Launcher Implementation
- * Based on reverse-engineered AMCL launch flow
+ * The launch core is our own implementation: it assembles the classpath from
+ * the version manifest, resolves the main class per mod loader, builds the
+ * JVM options and invokes <mainClass>.main(). No third-party launcher class
+ * or jar is loaded anywhere in the launch path.
  */
+
+// 启动器版本（写入 -Dminecraft.launcher.version）
+#define ABCL_VERSION "2.0.0"
 
 #include "jvm_launcher.h"
 #include "elf_loader.h"
@@ -157,21 +163,30 @@ GpuInfo JvmLauncher::getGpuInfo() {
 }
 
 JavaVMOption* JvmLauncher::buildJvmOptions(const JvmOptions &opts, int &optCount) {
-    // Build JVM arguments based on AMCL's patterns
+    // 组装 JVM 启动参数。
+    //
+    // 这里只包含「启动器本身该做的事」：内存、GC、目录、编码、原生库路径、
+    // 以及 Minecraft / LWJGL / Forge 在 Linux 系内核上通用的兼容开关。
+    // 不依赖任何第三方启动器的类或属性 —— classpath 完全由引擎从版本 JSON
+    // 解析出的依赖列表构成，入口类是该方法解析出的 mainClass。
     std::vector<JavaVMOption> options;
-    
+
     auto addOpt = [&](const std::string &opt) {
         JavaVMOption vmOpt;
         vmOpt.optionString = strdup(opt.c_str());
         vmOpt.extraInfo = nullptr;
         options.push_back(vmOpt);
     };
-    
-    // Memory settings
+
+    // ---- 内存 ----
     addOpt("-Xms" + std::to_string(opts.minMemory) + "m");
     addOpt("-Xmx" + std::to_string(opts.maxMemory) + "m");
-    
-    // GC settings (consistent with AMCL)
+
+    // ---- GC 与运行时 ----
+    // UseCompressedOops 关闭：OHOS 上 32 位压缩指针寻址会出问题
+    // UsePerfData 关闭：沙箱内没有 /tmp/hsperfdata 的写入约定
+    // DisableAttachMechanism 关闭：沙箱内不需要 attach
+    // ActiveProcessorCount 固定：容器/沙箱里 CPU 数探测常常不准
     addOpt("-XX:+UnlockExperimentalVMOptions");
     addOpt("-XX:+UseG1GC");
     addOpt("-XX:+UnlockDiagnosticVMOptions");
@@ -181,50 +196,70 @@ JavaVMOption* JvmLauncher::buildJvmOptions(const JvmOptions &opts, int &optCount
     addOpt("-XX:+DisablePrimordialThreadGuardPages");
     addOpt("-XX:ActiveProcessorCount=8");
     if (opts.jitEnabled) {
-        addOpt("-XX:TieredStopAtLevel=1");  // C1 compilation only for faster start
+        // 只跑到 C1：启动更快，容忍一些峰值性能损失
+        addOpt("-XX:TieredStopAtLevel=1");
     }
-    
-    // Java system properties (matching AMCL)
+
+    // ---- 基础属性 ----
     addOpt("-Djava.awt.headless=true");
-    addOpt("-Djava.system.class.loader=com.amcl.launcher.AmclClassLoader");
-    addOpt("-Damcl.platform.ohos=true");
     addOpt("-Dfile.encoding=UTF-8");
     addOpt("-Dsun.jnu.encoding=UTF-8");
     addOpt("-Djava.security.egd=file:/dev/./urandom");
-    addOpt("-Dorg.lwjgl.glfw.checkThread0=false");
+    // log4shell 缓解（Minecraft 依赖 log4j2）
     addOpt("-Dlog4j2.formatMsgNoLookups=true");
-    addOpt("-Dsodium.checks.issue2561=false");
-    
-    addOpt("-Damcl.mc.dir=" + opts.gameDir);
+
+    // ---- 工作目录 ----
     addOpt("-Duser.dir=" + opts.gameDir);
     addOpt("-Duser.home=" + opts.gameDir);
     addOpt("-Djava.io.tmpdir=" + opts.filesDir + "/tmp");
-    
+
+    // ---- 本启动器自己的标识 ----
+    addOpt("-Dabcl.platform=ohos");
+    addOpt("-Dabcl.mc.dir=" + opts.gameDir);
+    addOpt("-Dminecraft.launcher.brand=ABCL");
+    addOpt("-Dminecraft.launcher.version=" + std::string(ABCL_VERSION));
+
+    // ---- 原生库路径 ----
     std::string jreLib = m_javaHome + "/lib";
     addOpt("-Dsun.boot.library.path=" + jreLib);
     addOpt("-Djava.library.path=" + jreLib + ":" + opts.filesDir + "/natives");
     addOpt("-Djava.home=" + m_javaHome);
-    
+
+    // ---- LWJGL / GLFW ----
+    // checkThread0 关闭：渲染线程与窗口线程不同一是 OHOS 上的常态
+    addOpt("-Dorg.lwjgl.glfw.checkThread0=false");
     addOpt("-Dorg.lwjgl.shaderc.libname=shaderc");
     addOpt("-Dorg.lwjgl.spvc.libname=spirv-cross");
     addOpt("-Dorg.lwjgl.vulkan.libname=libvulkan.so");
-    
+
+    // ---- Forge / Mod 兼容 ----
+    // earlyprogresswindow 关闭：Forge 的早期进度窗依赖桌面 AWT
+    addOpt("-Dfml.earlyprogresswindow=false");
+    addOpt("-Dforge.enableGameTest=false");
+    // Sodium 的 issue 2561 检查在 OHOS 驱动上会误报
+    addOpt("-Dsodium.checks.issue2561=false");
+
     if (opts.isFabric) {
         addOpt("-Dfabric.noGui=true");
     }
-    
     if (!opts.gameLanguage.empty()) {
-        addOpt("-Damcl.gamelang=" + opts.gameLanguage);
+        addOpt("-Dabcl.gamelang=" + opts.gameLanguage);
     }
-    
-    // Set classpath for amcl-launcher.jar
-    std::string cp = opts.filesDir + "/amcl-launcher.jar";
-    for (const auto &entry : opts.classpath) {
-        cp += ":" + entry;
+
+    // ---- classpath ----
+    // 只放引擎解析出的游戏依赖（libraries + 版本 jar）。
+    // 启动器自身不往这里塞任何 jar —— 入口由 mainClass 决定。
+    std::string cp;
+    for (size_t i = 0; i < opts.classpath.size(); i++) {
+        if (i > 0) {
+            cp += ":";
+        }
+        cp += opts.classpath[i];
     }
     addOpt("-Djava.class.path=" + cp);
-    
-    // Custom JVM args
+    logInfo("JvmLauncher", "classpath entries: " + std::to_string(opts.classpath.size()));
+
+    // ---- 用户自定义 JVM 参数 ----
     if (!opts.customJvmArgs.empty()) {
         std::istringstream stream(opts.customJvmArgs);
         std::string arg;
@@ -234,18 +269,16 @@ JavaVMOption* JvmLauncher::buildJvmOptions(const JvmOptions &opts, int &optCount
             }
         }
     }
-    
+
     optCount = (int)options.size();
-    
-    // Allocate array
+
     JavaVMOption *result = new JavaVMOption[options.size()];
     for (size_t i = 0; i < options.size(); i++) {
         result[i] = options[i];
     }
-    
+
     return result;
 }
-
 bool JvmLauncher::createJvm(const JvmOptions &opts, JavaVMInitArgs &vmArgs) {
     logInfo("JvmLauncher", "Creating JVM...");
     
@@ -287,152 +320,131 @@ bool JvmLauncher::createJvm(const JvmOptions &opts, JavaVMInitArgs &vmArgs) {
     return true;
 }
 
-std::string JvmLauncher::escapeJson(const std::string &s) {
-    std::string result;
-    result.reserve(s.length());
-    for (char c : s) {
-        switch (c) {
-            case '"': result += "\\\""; break;
-            case '\\': result += "\\\\"; break;
-            case '\n': result += "\\n"; break;
-            case '\r': result += "\\r"; break;
-            case '\t': result += "\\t"; break;
-            default: result += c;
-        }
-    }
-    return result;
-}
-
-std::string JvmLauncher::buildLaunchConfigJson(const JvmOptions &opts) {
-    // Build the JSON config string that AmclLauncher expects
-    // Format is reverse-engineered from AMCL's LaunchConfig parser
-    
-    std::ostringstream json;
-    json << "{";
-    
-    json << "\"mainClass\":\"" << escapeJson(opts.mainClass) << "\",";
-    
-    json << "\"classpath\":[";
-    for (size_t i = 0; i < opts.classpath.size(); i++) {
-        if (i > 0) json << ",";
-        json << "\"" << escapeJson(opts.classpath[i]) << "\"";
-    }
-    json << "],";
-    
-    json << "\"mcArgs\":[";
-    // Build standard Minecraft arguments
-    std::vector<std::string> mcArgs;
-    // Main MC args are passed to this array
-    mcArgs = opts.mcArgs;
-    for (size_t i = 0; i < mcArgs.size(); i++) {
-        if (i > 0) json << ",";
-        json << "\"" << escapeJson(mcArgs[i]) << "\"";
-    }
-    json << "],";
-    
-    json << "\"gameDir\":\"" << escapeJson(opts.gameDir) << "\",";
-    json << "\"mcDir\":\"" << escapeJson(opts.mcDir) << "\",";
-    json << "\"filesDir\":\"" << escapeJson(opts.filesDir) << "\",";
-    json << "\"assetsDir\":\"" << escapeJson(opts.assetsDir) << "\",";
-    json << "\"isForge\":" << (opts.isForge ? "true" : "false") << ",";
-    json << "\"isFabric\":" << (opts.isFabric ? "true" : "false");
-    
-    json << "}";
-    return json.str();
-}
-
 int JvmLauncher::invokeMainClass(const JvmOptions &opts) {
     logInfo("JvmLauncher", "Invoking main class: " + opts.mainClass);
-    
+
     if (!m_env) {
         logError("JvmLauncher", "JNIEnv is null");
         return -1;
     }
-    
-    // Build the launch config JSON
-    std::string launchConfig = buildLaunchConfigJson(opts);
-    appendLog("[HMCL] Launch config: " + launchConfig);
-    std::cout << "[AmclLauncher] Launch config: " << launchConfig << std::endl;
-    
-    // Find AmclLauncher class
-    jclass launcherClass = m_env->FindClass("com/amcl/launcher/AmclLauncher");
-    if (!launcherClass) {
+
+    // JNI 的类名用 '/' 分隔
+    std::string slashed;
+    slashed.reserve(opts.mainClass.size());
+    for (size_t i = 0; i < opts.mainClass.size(); i++) {
+        char c = opts.mainClass[i];
+        slashed += (c == '.') ? '/' : c;
+    }
+
+    appendLog("[ABCL] main class : " + opts.mainClass);
+    appendLog("[ABCL] classpath  : " + std::to_string(opts.classpath.size()) + " entries");
+    appendLog("[ABCL] game args  : " + std::to_string(opts.mcArgs.size()) + " args");
+
+    // 直接从系统类加载器解析入口类。
+    // 我们不再改写 java.system.class.loader，所以这里拿到的是 JVM 默认的
+    // 应用类加载器，它读取 -Djava.class.path 指向的全部依赖。
+    jclass mainCls = m_env->FindClass(slashed.c_str());
+    if (!mainCls) {
         if (m_env->ExceptionCheck()) {
+            m_env->ExceptionDescribe();
             m_env->ExceptionClear();
         }
-        logError("JvmLauncher", "Cannot find AmclLauncher class in classpath");
-        appendLog("[HMCL] ERROR: AmclLauncher not found. Check amcl-launcher.jar in filesDir.");
+        logError("JvmLauncher", "Cannot find main class: " + opts.mainClass);
+        appendLog("[ABCL] ERROR: 找不到入口类 " + opts.mainClass);
+        appendLog("[ABCL]        请确认该版本的依赖已下载完整（libraries + 版本 jar）");
+        appendLog("[ABCL]        classpath 条目数：" + std::to_string(opts.classpath.size()));
+        for (size_t i = 0; i < opts.classpath.size() && i < 40; i++) {
+            appendLog("[ABCL]          - " + opts.classpath[i]);
+        }
         return -1;
     }
-    
-    // Find main method
-    jmethodID mainMethod = m_env->GetStaticMethodID(launcherClass, "main", "([Ljava/lang/String;)V");
+
+    jmethodID mainMethod = m_env->GetStaticMethodID(mainCls, "main", "([Ljava/lang/String;)V");
     if (!mainMethod) {
         if (m_env->ExceptionCheck()) {
             m_env->ExceptionClear();
         }
-        logError("JvmLauncher", "Cannot find AmclLauncher.main method");
+        logError("JvmLauncher", "main(String[]) not found in " + opts.mainClass);
+        appendLog("[ABCL] ERROR: " + opts.mainClass + " 没有 main(String[]) 方法");
         return -1;
     }
-    
-    // Build args array
+
     jclass stringClass = m_env->FindClass("java/lang/String");
-    jobjectArray argsArray = m_env->NewObjectArray(1, stringClass, nullptr);
-    jstring configArg = m_env->NewStringUTF(launchConfig.c_str());
-    m_env->SetObjectArrayElement(argsArray, 0, configArg);
-    
-    // Invoke AmclLauncher.main()
-    logInfo("JvmLauncher", "Calling AmclLauncher.main()...");
-    appendLog("[HMCL] Starting Minecraft via AmclLauncher...");
-    
-    m_env->CallStaticVoidMethod(launcherClass, mainMethod, argsArray);
-    
-    // Check for exceptions
-    if (m_env->ExceptionCheck()) {
-        m_env->ExceptionDescribe();  // Print to stderr
-        m_env->ExceptionClear();
-        logError("JvmLauncher", "AmclLauncher.main() threw an exception");
-        appendLog("[HMCL] ERROR: AmclLauncher.main() threw an exception");
+    if (!stringClass) {
+        if (m_env->ExceptionCheck()) {
+            m_env->ExceptionClear();
+        }
         return -1;
     }
-    
-    logInfo("JvmLauncher", "AmclLauncher.main() returned successfully");
-    appendLog("[HMCL] Minecraft exited normally");
-    
+
+    jobjectArray argsArray = m_env->NewObjectArray((jsize)opts.mcArgs.size(), stringClass, nullptr);
+    if (!argsArray) {
+        if (m_env->ExceptionCheck()) {
+            m_env->ExceptionClear();
+        }
+        return -1;
+    }
+    for (size_t i = 0; i < opts.mcArgs.size(); i++) {
+        jstring argStr = m_env->NewStringUTF(opts.mcArgs[i].c_str());
+        if (!argStr) {
+            if (m_env->ExceptionCheck()) {
+                m_env->ExceptionClear();
+            }
+            continue;
+        }
+        m_env->SetObjectArrayElement(argsArray, (jsize)i, argStr);
+        m_env->DeleteLocalRef(argStr);
+    }
+
+    setLaunchStatus(LaunchStatus::RUNNING);
+    appendLog("[ABCL] Starting Minecraft (" + opts.mainClass + ")...");
+    logInfo("JvmLauncher", "Calling " + opts.mainClass + ".main()...");
+
+    m_env->CallStaticVoidMethod(mainCls, mainMethod, argsArray);
+
+    if (m_env->ExceptionCheck()) {
+        m_env->ExceptionDescribe();
+        m_env->ExceptionClear();
+        logError("JvmLauncher", opts.mainClass + ".main() threw an exception");
+        appendLog("[ABCL] ERROR: " + opts.mainClass + ".main() 抛出异常");
+        return -1;
+    }
+
+    logInfo("JvmLauncher", opts.mainClass + ".main() returned");
+    appendLog("[ABCL] Minecraft exited normally");
     return 0;
 }
-
 int JvmLauncher::launch(const JvmOptions &opts) {
     logInfo("JvmLauncher", "Launching Minecraft...");
     setLaunchStatus(LaunchStatus::LAUNCHING);
     
-    appendLog("[HMCL] Launching " + opts.mainClass);
-    appendLog("[HMCL] Game dir: " + opts.gameDir);
-    appendLog("[HMCL] Java home: " + m_javaHome);
-    appendLog("[HMCL] Forge: " + std::to_string(opts.isForge));
-    appendLog("[HMCL] Fabric: " + std::to_string(opts.isFabric));
-    appendLog("[HMCL] Memory: " + std::to_string(opts.minMemory) + "/" + std::to_string(opts.maxMemory) + "MB");
-    appendLog("[HMCL] Classpath entries: " + std::to_string(opts.classpath.size()));
+    appendLog("[ABCL] Launching " + opts.mainClass);
+    appendLog("[ABCL] Game dir: " + opts.gameDir);
+    appendLog("[ABCL] Java home: " + m_javaHome);
+    appendLog("[ABCL] Forge: " + std::to_string(opts.isForge));
+    appendLog("[ABCL] Fabric: " + std::to_string(opts.isFabric));
+    appendLog("[ABCL] Memory: " + std::to_string(opts.minMemory) + "/" + std::to_string(opts.maxMemory) + "MB");
+    appendLog("[ABCL] Classpath entries: " + std::to_string(opts.classpath.size()));
     
     // Step 1: Create JVM
     JavaVMInitArgs vmArgs;
     if (!createJvm(opts, vmArgs)) {
         setLaunchStatus(LaunchStatus::ERROR);
-        appendLog("[HMCL] ERROR: Failed to create JVM");
+        appendLog("[ABCL] ERROR: Failed to create JVM");
         return -1;
     }
     
     setLaunchStatus(LaunchStatus::JVM_READY);
     
     // Step 2: Mark as RUNNING before blocking call
-    // AmclLauncher.main() blocks until the game window closes
+    // <mainClass>.main() blocks until the game window closes
     setLaunchStatus(LaunchStatus::RUNNING);
-    appendLog("[HMCL] AmclLauncher.main() starting (game is now RUNNING)");
+    appendLog("[ABCL] entering main loop (game is now RUNNING)");
     
-    // Step 3: Invoke Minecraft main class via AmclLauncher
+    // Step 3: invoke the resolved Minecraft main class
     int result = invokeMainClass(opts);
     
-    // AmclLauncher.main() returned - game has exited
+    // <mainClass>.main() returned - game has exited
     if (result == 0) {
         setLaunchStatus(LaunchStatus::STOPPED);
     } else {

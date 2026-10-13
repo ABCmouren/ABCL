@@ -4,7 +4,7 @@
  * Registers all native functions callable from ArkTS.
  * This is the main bridge between HMCL's ArkTS UI and the native JVM layer.
  *
- * Exported NAPI functions (mirroring AMCL's interface):
+ * Exported NAPI functions:
  * - jvmInit(javaHome: string): boolean
  * - jvmCheckJitAvailable(): boolean
  * - getGpuInfo(): GpuInfo
@@ -357,10 +357,15 @@ static napi_value RegisterXComponent(napi_env env, napi_callback_info info) {
     
     if (argc >= 1) {
         g_xComponentId = napiGetString(env, args[0]);
-        // Set environment variable for GLFW/LWJGL shim to discover the surface.
-        // AMCL's GLFW stub reads this env var to call OH_NativeWindow_CreateNativeWindowFromSurfaceId().
+        // OHOS 兼容的 LWJGL / GLFW stub 是 mc-ohos-resources 提供的预编译
+        // 产物，它按约定从环境变量取 surface id，再调
+        // OH_NativeWindow_CreateNativeWindowFromSurfaceId()。
+        // 该二进制不在本仓库内、无法改名，因此两个名字都导出：
+        //   ABCL_SURFACE_ID — 本项目自己的约定名
+        //   AMCL_SURFACE_ID — 上游预编译 LWJGL 期望的历史名
+        setenv("ABCL_SURFACE_ID", g_xComponentId.c_str(), 1);
         setenv("AMCL_SURFACE_ID", g_xComponentId.c_str(), 1);
-        logInfo("NAPI", "XComponent registered via env AMCL_SURFACE_ID: " + g_xComponentId);
+        logInfo("NAPI", "XComponent surface registered: " + g_xComponentId);
         return napiCreateBool(env, true);
     }
     

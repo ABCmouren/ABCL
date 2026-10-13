@@ -126,7 +126,7 @@ export class ProcessLauncher {
 
     // System properties
     args.push('-Djava.awt.headless=true');
-    args.push('-Damcl.platform.ohos=true');
+    args.push('-Dabcl.platform=ohos');
     args.push('-Dfile.encoding=UTF-8');
     args.push('-Dsun.jnu.encoding=UTF-8');
     args.push('-Djava.security.egd=file:/dev/./urandom');
@@ -135,7 +135,7 @@ export class ProcessLauncher {
     args.push('-Dsodium.checks.issue2561=false');
 
     // Paths
-    args.push('-Damcl.mc.dir=' + opts.gameDir);
+    args.push('-Dabcl.mc.dir=' + opts.gameDir);
     args.push('-Duser.dir=' + opts.gameDir);
     args.push('-Duser.home=' + opts.gameDir);
     args.push('-Djava.io.tmpdir=' + opts.filesDir + '/tmp');
@@ -155,9 +155,10 @@ export class ProcessLauncher {
     }
 
     // Build classpath
-    let cp = opts.filesDir + '/' + Constants.AMCL_LAUNCHER_JAR;
+    // classpath 只由游戏依赖构成，启动器自身不塞 jar
+    let cp = '';
     for (const entry of opts.classpath) {
-      cp = cp + ':' + entry;
+      cp = cp.length === 0 ? entry : (cp + ':' + entry);
     }
     args.push('-Djava.class.path=' + cp);
 

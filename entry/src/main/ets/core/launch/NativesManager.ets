@@ -1,7 +1,7 @@
 /**
  * NativesManager — 原生 LWJGL .so 库下载/提取管理器
  *
- * AMCL 的 OHOS 兼容 LWJGL 需要以下原生 .so 库：
+ * OHOS 兼容的 LWJGL 构建需要以下原生 .so 库：
  * - libglfw.so（GLFW 窗口/输入）
  * - liblwjgl.so（LWJGL 核心）
  * - liblwjgl_opengl.so（OpenGL 渲染）
@@ -41,7 +41,7 @@ export class NativesManager {
   /** 已下载的库列表 */
   private downloadedLibs: string[] = [];
 
-  /** 原生库下载基础 URL（AMCL 的 mc-ohos-resources release） */
+  /** 原生库下载基础 URL（mc-ohos-resources release） */
   private static readonly NATIVES_BASE_URL =
     'https://github.com/LZZLHY/mc-ohos-resources/releases/download/v1.0.0';
 

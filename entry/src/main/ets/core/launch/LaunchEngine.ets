@@ -13,6 +13,7 @@ import { Constants } from '../../config/Constants';
 import { VersionManager } from '../game/VersionManager';
 import { Logger, FileUtils } from '../util/Utils';
 import { ProcessLauncher, ProcessHandle as ProcessHandleExt } from './ProcessLauncher';
+import { JavaManager, JdkInfo } from './JavaManager';
 
 import * as native from './NativeBridge';
 
@@ -154,7 +155,7 @@ export class LaunchEngine {
    */
   registerXComponent(surfaceId: string): void {
     this.xComponentSurfaceId = surfaceId;
-    // Pass to native layer which sets AMCL_SURFACE_ID env var
+    // Pass to native layer which exports it as a surface-id env var
     // LWJGL GLFW shim reads this env var to bind to the XComponent
     if (this.nativeReady) {
       native.registerXComponent(surfaceId);
@@ -175,6 +176,38 @@ export class LaunchEngine {
    * Wait for JDK runtime to be ready before launching.
    * Checks if libjvm.so exists at the current javaHome path.
    */
+  /**
+   * 按实例的 MC 版本挑选 Java 运行时。
+   *
+   * 依据 JavaManager.REQUIREMENTS：1.20.5+ → 21、1.17~1.20.4 → 17、
+   * 1.16.5 及以下 → 8。挑不到精确匹配时 pickFor 会退回最接近的可用版本。
+   *
+   * 注意：JVM 在一个进程里只能创建一次，所以同一会话内先启动老版本
+   * 再启动新版本时无法换 JDK —— 这是 in-process JVM 的固有限制，
+   * 这里只在首次创建 JVM 前生效。
+   */
+  private selectJavaHome(inst: GameInstallation): void {
+    const root: string = JavaManager.root(Constants.appDir);
+    const jdks: JdkInfo[] = JavaManager.scan(root);
+    if (jdks.length === 0) {
+      Logger.warn(LaunchEngine.TAG, '未扫描到任何 JDK，沿用当前 javaHome');
+      return;
+    }
+    const need: number = JavaManager.requiredJavaMajor(inst.gameVersion);
+    const jdk: JdkInfo | null = JavaManager.pickFor(jdks, inst.gameVersion);
+    if (jdk === null) {
+      Logger.warn(LaunchEngine.TAG,
+        '没有可用的 Java ' + need + ' 运行时，沿用当前 javaHome');
+      return;
+    }
+    if (jdk.path !== this.javaHome) {
+      Logger.info(LaunchEngine.TAG,
+        'JDK 选择：MC ' + inst.gameVersion + ' 需要 Java ' + need +
+        ' → ' + jdk.name + '（' + jdk.path + '）');
+      this.javaHome = jdk.path;
+    }
+  }
+
   private async waitForJdkReady(): Promise<boolean> {
     if (!this.jdkExtractionStarted) {
       // Extraction not even started - JDK was likely already installed
@@ -221,6 +254,11 @@ export class LaunchEngine {
     this.gameRunning = true;
 
     try {
+      // 先按实例的 MC 版本挑 JDK。必须在 JVM 创建之前完成 ——
+      // 之前 EntryAbility 固定传 jdk17，导致 1.8.9 / 1.12.2 / 1.16.5 这类
+      // 老版本也用 Java 17 启动，Forge 1.8.9 在 Java 17 上会直接崩。
+      this.selectJavaHome(installation);
+
       // Wait for JDK to be ready (extraction may still be in progress)
       const jdkReady: boolean = await this.waitForJdkReady();
       if (!jdkReady) {
@@ -561,7 +599,7 @@ export class LaunchEngine {
    * Launch game from pending config stored in AppStorage by GameListPage.
    * Called by GameView after XComponent surface is registered.
    * Reconstructs GameInstallation + Account from JSON and calls launch().
-   * This matches AMCL's game launch flow from the rendering surface.
+   * 从渲染表面触发游戏启动的流程。
    */
   async launchFromPending(pendingJson: string): Promise<void> {
     Logger.info(LaunchEngine.TAG, 'launchFromPending called');

@@ -15,18 +15,22 @@
 
 ## 📋 概述
 
-ABCL 是 [HMCL](https://github.com/HMCL-dev/HMCL)（Hello Minecraft! Launcher）的鸿蒙原生移植版，参考了 [AMCL](https://github.com/LZZLHY/amcl)（Axe Minecraft Launcher）的实现。**AMCL 的源码是公开的**（`MyApplication/JavaApp/src/com/amcl/launcher/` 是 Java 启动层，`MyApplication/entry/src/main/cpp/` 是 native 层），因此本项目可以直接对齐它的启动契约与资源版本。ABCL 使用 **ArkTS + ArkUI** 构建 UI，通过 **NAPI C++ 桥接层** 加载 `libjvm.so` 创建 JVM 来运行 Minecraft Java Edition。
+ABCL 是 [HMCL](https://github.com/HMCL-dev/HMCL)（Hello Minecraft! Launcher）的鸿蒙原生移植版。UI 使用 **ArkTS + ArkUI**，通过 **NAPI C++ 桥接层** 加载 `libjvm.so` 创建 JVM 来运行 Minecraft Java Edition。
 
-### 与 AMCL 上游的同步状态
+**启动核心是自研的。** 从版本清单 `<version>.json` 解析依赖、沿 `inheritsFrom` 链确定入口类、按加载器组装 JVM 参数与游戏参数、经 JNI 调用 `<mainClass>.main(String[])` —— 这条链路全部由本项目实现，**运行时不加载任何第三方启动器的类或 jar**。
 
-截至 **2026-09-24**，AMCL 最新 Release 为 **v1.0.5**（unsigned HAP）。本项目与上游的对齐情况：
+> 设计与排查过程中参考过 [AMCL](https://github.com/LZZLHY/amcl) 等鸿蒙 Minecraft 启动器的公开做法，功能与交互则对齐 [HMCL](https://github.com/HMCL-dev/HMCL)。这些只是**参考**，没有把它们的启动核心作为依赖引入。
 
-| 项 | 状态 |
+### 上游资源依赖
+
+以下是从上游项目获取的**二进制/数据资源**，不属于启动核心：
+
+| 资源 | 说明 |
 |---|---|
-| `amcl-launcher.jar` | 由上游 `MyApplication/JavaApp/src/com/amcl/launcher/` 全部 18 个类重新编译（`javac --release 8`），`LaunchConfig` 的 9 个字段与上游一致 |
-| JDK 运行时 | 对齐 `mc-ohos-resources` 最新 release：JDK 8 `v8u452-ohos-4`、JDK 17 `v17.0.13-ohos-5`、JDK 21 `v21.0.5-ohos-7`、JDK 25 `v25.0.4-ohos-2`（sha256 与上游 release 元数据一致） |
-| Forge/NeoForge processors | 对齐 AMCL `ForgelikeNative.runJavaProcessor` 契约，native 侧新增 `runJavaProcessor` |
-| Maven / meta 端点 | 修正 NeoForge 的 `/releases` 前缀、Fabric/Quilt 改走官方 meta API、BMCLAPI 镜像路径改为 `/maven/` |
+| JDK 运行时 | 来自 [`mc-ohos-resources`](https://github.com/LZZLHY/mc-ohos-resources) 的 GPL-2.0 构建（JDK 8 / 17 / 21），已打包进 HAP，避免上游撤包后无法使用 |
+| OHOS 兼容的 LWJGL / GLFW | 同上；预编译二进制，按 `ABCL_SURFACE_ID`（兼容别名 `AMCL_SURFACE_ID`）约定取得渲染 surface |
+| Forge/NeoForge processors | native 侧自研 `runJavaProcessor`，fork 子进程执行 installer 的 processor |
+| Maven / meta 端点 | NeoForge `/releases` 前缀、Fabric/Quilt 官方 meta API、BMCLAPI `/maven/` 镜像 |
 
 > 详细的排查与修复记录见 **[FIXES-2026-10.md](./FIXES-2026-10.md)**。
 
@@ -97,7 +101,7 @@ HarmonyOS NEXT 是纯血鸿蒙系统，**不内置 JVM**。要在鸿蒙设备上
 │ Layer 2: Native C++ 桥接层 (libhmcl_native.so)      │
 │                                                     │
 │  napi_init.cpp    — NAPI 入口，注册所有原生函数      │
-│  jvm_launcher.cpp — JNI_CreateJavaVM, AmclLauncher  │
+│  jvm_launcher.cpp — JNI_CreateJavaVM + 主类调用      │
 │  elf_loader.cpp   — 自定义 ELF 加载器 (JIT bypass)  │
 │  input_bridge.cpp — 输入事件转发到 JNI               │
 │  log.cpp          — 日志桥接                         │
@@ -109,9 +113,9 @@ HarmonyOS NEXT 是纯血鸿蒙系统，**不内置 JVM**。要在鸿蒙设备上
 │                                                     │
 │  libjvm.so (JDK)                                    │
 │    ├─ JNI_CreateJavaVM                              │
-│    ├─ AmclLauncher.main(configJson)                  │
-│    └─ net.minecraft.client.main.Main                 │
-│                                                      │
+│    ├─ 解析 classpath 与入口类（沿 inheritsFrom）      │
+│    └─ <mainClass>.main(gameArgs)                    │
+│                                                     │
 │  LWJGL (HarmonyOS 兼容版)                            │
 │    ├─ GLFW shim → XComponent surface                 │
 │    ├─ OpenGL ES 渲染                                 │
@@ -146,8 +150,8 @@ launchFromPending() → 调用 LaunchEngine.launch()
     │
     ├─ Native Bridge 可用? → nativeLaunch()
     │   ├─ jvmInit(javaHome) → dlopen libjvm.so
-    │   ├─ 构建 classpath + mcArgs + launchConfigJson
-    │   └─ mcLaunch(configJson) → JNI_CreateJavaVM → AmclLauncher.main()
+    │   ├─ 解析 classpath（libraries + 版本 jar）与入口 mainClass
+    │   └─ mcLaunch(...) → JNI_CreateJavaVM → <mainClass>.main(gameArgs)
     │
     └─ 不可用? → processLaunch() → @ohos.process fallback
                    └─ 否则 → stubLaunch() (日志模式)
@@ -213,7 +217,6 @@ ABCL/
 │           │       └── DownloadTask.ets      # 下载任务模型
 │           └── resources/
 │               └── rawfile/                  # HAP 内置资源
-│                   ├── amcl-launcher.jar     # AMCL 启动入口（18 个类，~105KB）
 │                   ├── cacert.pem            # CA 证书
 │                   ├── stub-objc-bridge.jar  # ObjC 桥接桩（~54KB）
 │                   ├── jdk8-ohos-full-v4.zip # JDK 8 (~38MB)
@@ -326,9 +329,9 @@ HarmonyOS 兼容的 LWJGL 3.x 构建，包含 14 个 JAR 文件（~12MB），覆
 |------|------|------|
 | ArkTS UI 页面 | ✅ 完成 | 所有页面构建通过，0 错误 |
 | Native Bridge (libhmcl_native.so) | ✅ 完成 | arm64-v8a + x86_64 双架构 |
-| JVM 创建与启动 | ✅ 完成 | dlopen → JNI_CreateJavaVM → AmclLauncher.main() |
+| JVM 创建与启动 | ✅ 完成 | dlopen → JNI_CreateJavaVM → `<mainClass>.main()`（自研启动核心） |
 | JDK 提取 (rawfile → sandbox) | ✅ 完成 | 支持 ZIP 解压 + 自动展平 |
-| LWJGL XComponent 绑定 | ✅ 完成 | 通过 AMCL_SURFACE_ID 环境变量 |
+| LWJGL XComponent 绑定 | ✅ 完成 | 通过 ABCL_SURFACE_ID 环境变量（兼容 AMCL_SURFACE_ID） |
 | 模组加载器安装 | ✅ 完成 | Forge / NeoForge / Fabric / Quilt |
 | 设置持久化 | ✅ 完成 | `@ohos.data.preferences` 自动保存 |
 | 资源包下载 | ✅ 完成 | Asset index + objects 下载，BMCLAPI 镜像 |
@@ -342,7 +345,7 @@ HarmonyOS 兼容的 LWJGL 3.x 构建，包含 14 个 JAR 文件（~12MB），覆
 ## 🙏 致谢
 
 - **[HMCL](https://github.com/HMCL-dev/HMCL)** — 上游启动器项目，GPL-3.0 许可
-- **[AMCL](https://github.com/LZZLHY/amcl/releases)** — 鸿蒙原生 Minecraft 启动器，本项目参考了其原生启动架构（AmclLauncher、GLFW shim、AMCL_SURFACE_ID 约定）
+- **[AMCL](https://github.com/LZZLHY/amcl/releases)** — 鸿蒙原生 Minecraft 启动器；本项目在设计与排查时参考过它的公开实现与设备适配经验（**启动核心为自研，未引入其代码**）
 - **[LZZLHY/mc-ohos-resources](https://github.com/LZZLHY/mc-ohos-resources)** — HarmonyOS 编译的 JDK 和 LWJGL 资源
 
 ---

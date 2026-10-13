@@ -2,7 +2,7 @@
  * HMCL Native Bridge - Input Bridge
  * 
  * Bridges touch/input events from ArkTS UI to the JVM/LWJGL layer.
- * Mirrors AMCL's inputBridge architecture.
+ * Input bridge between the ArkTS UI layer and the native XComponent surface.
  *
  * The input bridge:
  * 1. Receives touch events from ArkTS XComponent callbacks

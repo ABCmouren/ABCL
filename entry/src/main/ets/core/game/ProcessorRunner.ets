@@ -7,7 +7,7 @@
  * 避免 installer.jar 的 shaded 库污染）。
  *
  * 执行入口是 native 的 `runJavaProcessor`（fork 子进程 + 独立 JVM），
- * 对应 AMCL 的 ForgelikeNative.runJavaProcessor 契约。若当前构建没有该 native 接口，
+ * 由 native 侧的 runJavaProcessor 提供进程能力。若当前构建没有该 native 接口，
  * 这里会抛出明确错误，而不是让用户拿到一个"看起来装好了但起不来"的 Forge。
  */
 import { Constants } from '../../config/Constants';

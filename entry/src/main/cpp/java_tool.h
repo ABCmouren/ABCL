@@ -4,7 +4,7 @@
  * 用途：Forge / NeoForge 安装期必须执行的 processors
  * （installertools / jarsplitter / ForgeAutoRenamingTool / binarypatcher …）。
  * 每个 processor 用**只含自己声明的 jar**的干净 classpath 起一个独立 JVM，
- * 避免 installer.jar 里 shaded 的库污染（FCL / HMCL 同款做法，对应 AMCL 的 fork_run_java）。
+ * 避免 installer.jar 里 shaded 的库污染（FCL / HMCL 同款做法）。
  */
 #ifndef HMCL_JAVA_TOOL_H
 #define HMCL_JAVA_TOOL_H

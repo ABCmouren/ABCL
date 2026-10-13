@@ -111,7 +111,7 @@ export class Constants {
   /** 运行设备的 CPU 架构（'aarch64' / 'x86_64'），由 EntryAbility 从 deviceInfo.abiList 注入 */
   static osArch: string = 'aarch64';
 
-  // 下载并发（AMCL 的 native 引擎默认 6~8；assets 多而小，可以更高）
+  // 下载并发（assets 多而小，可以比默认值更高）
   static readonly DOWNLOAD_CONCURRENCY = 8;
   static readonly ASSET_CONCURRENCY = 12;
 
@@ -148,7 +148,7 @@ export class Constants {
   static readonly DEFAULT_WIDTH = 854;
   static readonly DEFAULT_HEIGHT = 480;
 
-  // JDK Runtime (AMCL's mc-ohos-resources GPL-2.0 builds)
+  // JDK Runtime（mc-ohos-resources 的 GPL-2.0 构建）
   static readonly JDK_RELEASES_BASE = 'https://github.com/LZZLHY/mc-ohos-resources/releases/download';
 
   // JDK 17 - Stable (MC 1.18-1.20.4)
@@ -187,10 +187,7 @@ export class Constants {
   static readonly JDK_17_RAWFILE = 'jdk17-ohos-full-v5.zip';
   static readonly JDK_21_RAWFILE = 'jdk21-ohos-full-v7.zip';
 
-  // Amcl launcher JAR (bundled in rawfile or downloaded)
-  static readonly AMCL_LAUNCHER_JAR = 'amcl-launcher.jar';
-
-  // GLFW native lib for HarmonyOS (reuse from AMCL build)
+  // GLFW native lib for HarmonyOS（mc-ohos-resources 的 OHOS 构建）
   static readonly GLFW_LIB_NAME = 'libglfw.so';
   
   // Native libraries that need to be extracted for LWJGL
@@ -204,7 +201,7 @@ export class Constants {
     'libc++_shared.so',
   ];
 
-  // LWJGL JARs bundled in rawfile (AMCL's OHOS-compatible build)
+  // LWJGL JARs bundled in rawfile（mc-ohos-resources 的 OHOS 兼容构建）
   // Extracted at startup to lwjgl_jars/ dir and added to classpath
   static readonly LWJGL_JAR_RAWFILES: string[] = [
     'lwjgl/lwjgl.jar',

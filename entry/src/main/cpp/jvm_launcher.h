@@ -2,15 +2,15 @@
  * HMCL Native Bridge - JVM Launcher
  * 
  * Initializes the Java Virtual Machine from a cross-compiled OpenJDK runtime
- * and launches Minecraft via the amcl-launcher.jar entry point.
+ * and launches Minecraft by invoking the resolved main class directly.
  *
  * The launch flow:
  * 1. Locate JDK runtime (downloaded to app sandbox)
  * 2. Set up environment (JAVA_HOME, LD_LIBRARY_PATH, etc.)
  * 3. Load libjvm.so via custom ELF loader (JIT bypass)
  * 4. Call JNI_CreateJavaVM
- * 5. Load AmclLauncher main class
- * 6. Invoke AmclLauncher.main() with LaunchConfig JSON
+ * 5. Resolve the game main class from the version manifest
+ * 6. Invoke <mainClass>.main(String[]) with the game arguments
  * 7. Monitor game process
  */
 
@@ -164,8 +164,6 @@ private:
     bool createJvm(const JvmOptions &opts, JavaVMInitArgs &vmArgs);
     JavaVMOption* buildJvmOptions(const JvmOptions &opts, int &optCount);
     int invokeMainClass(const JvmOptions &opts);
-    std::string buildLaunchConfigJson(const JvmOptions &opts);
-    std::string escapeJson(const std::string &s);
     void setLaunchStatus(LaunchStatus status);
 
     void appendLog(const std::string &line);

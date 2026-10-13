@@ -77,11 +77,7 @@ export default class EntryAbility extends UIAbility {
     const launchEngine = LaunchEngine.getInstance();
     launchEngine.init(filesDir);
 
-    // Extract essential files from rawfile before loading UI
-    // 1. amcl-launcher.jar (required for JVM game launch)
-    await EntryAbility.extractEssentialRawfiles(context.resourceManager, filesDir);
-
-    // 2. Extract LWJGL JARs in background (for OHOS compatibility)
+    // Extract LWJGL JARs in background (for OHOS compatibility)
     EntryAbility.extractLwjglJars(context.resourceManager, filesDir);
 
     // 3. Extract bundled JDKs in background (UI loads in parallel)
@@ -143,28 +139,9 @@ export default class EntryAbility extends UIAbility {
    * Extract essential runtime files from rawfile before any game launch.
    * These files are required for JVM initialization and game launch.
    */
-  private static async extractEssentialRawfiles(
-    mgr: resourceManager.ResourceManager,
-    filesDir: string,
-  ): Promise<void> {
-    // Extract amcl-launcher.jar (required for JVM game entry point)
-    const amclJarPath: string = `${filesDir}/${Constants.AMCL_LAUNCHER_JAR}`;
-    if (!FileUtils.exists(amclJarPath)) {
-      Logger.info('EntryAbility', 'Extracting amcl-launcher.jar from rawfile...');
-      const ok: boolean = await JdkExtractor.extractRawFile(mgr, Constants.AMCL_LAUNCHER_JAR, amclJarPath);
-      if (ok) {
-        Logger.info('EntryAbility', 'amcl-launcher.jar extracted successfully');
-      } else {
-        Logger.warn('EntryAbility', 'amcl-launcher.jar not found in rawfile, will use fallback');
-      }
-    } else {
-      Logger.info('EntryAbility', 'amcl-launcher.jar already exists in sandbox');
-    }
-  }
-
   /**
    * Extract LWJGL JARs from rawfile to lwjgl_jars/ directory.
-   * These are AMCL's OHOS-compatible LWJGL builds that override
+   * These are the OHOS-compatible LWJGL builds that override
    * standard LWJGL JARs from the Minecraft libraries.
    * Non-blocking: runs in background while UI loads.
    */

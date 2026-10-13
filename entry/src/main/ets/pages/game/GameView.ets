@@ -5,9 +5,9 @@
  * Flow:
  *   1. XComponent creates native surface → loads hmcl_native library
  *   2. After surface is ready, get surfaceId from controller
- *   3. Register surfaceId with LaunchEngine (passes to native/AmclLauncher)
+ *   3. Register surfaceId with LaunchEngine (passed down to the native layer)
  *   4. LaunchEngine reads pending launch params (set by GameListPage)
- *   5. JVM starts, AmclLauncher binds LWJGL to this surface via OH_NativeWindow
+ *   5. JVM starts; the LWJGL stub binds to this surface via OH_NativeWindow
  */
 
 import { LaunchEngine } from '../../core/launch/LaunchEngine';

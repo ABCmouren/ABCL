@@ -4,7 +4,7 @@
  * 旧版本 VersionManager.installVersion() 只下载了 version json + client.jar，
  * **既不下载 libraries 也不下载 assets**，所以"安装完成"的版本根本起不来。
  *
- * 现在按 HMCL / AMCL 的完整流程执行：
+ * 现在按 HMCL 的完整流程执行：
  *   prepare   拉取 version_manifest_v2 → 版本元数据 JSON → 落盘
  *   client    下载 client.jar
  *   libraries 下载所有库文件（含 rules 过滤 + linux natives 分类器）
