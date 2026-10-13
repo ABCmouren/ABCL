@@ -469,9 +469,55 @@ int JvmLauncher::invokeMainClass(const JvmOptions &opts) {
     appendLog("[ABCL] classpath  : " + std::to_string(opts.classpath.size()) + " entries");
     appendLog("[ABCL] game args  : " + std::to_string(opts.mcArgs.size()) + " args");
 
-    // 从系统类加载器解析入口类。启用兼容层时它就是 AmclClassLoader，
-    // 因此这里加载到的类已经过它的字节码变换。
-    jclass mainCls = m_env->FindClass(slashed.c_str());
+    // 解析入口类。
+    //
+    // 优先走「系统类加载器 + loadClass」，与兼容层自身验证过的路径一致
+    // （它的 launchPrepared 就是这么做的）。启用兼容层时系统类加载器就是
+    // AmclClassLoader，加载到的类已经过它的字节码变换。
+    //
+    // 之所以不直接用 JNI FindClass：按规范两者等价（当前线程无 Java 帧时
+    // FindClass 也走系统类加载器），但这条路径在本机无法实测，
+    // 因此无条件对齐它验证过的调用方式，FindClass 仅作兜底。
+    jclass mainCls = nullptr;
+    {
+        jclass clCls = m_env->FindClass("java/lang/ClassLoader");
+        if (clCls != nullptr) {
+            jmethodID getSys = m_env->GetStaticMethodID(clCls, "getSystemClassLoader",
+                                                        "()Ljava/lang/ClassLoader;");
+            jmethodID loadCls = m_env->GetMethodID(clCls, "loadClass",
+                                                   "(Ljava/lang/String;)Ljava/lang/Class;");
+            if (getSys != nullptr && loadCls != nullptr) {
+                jobject sysLoader = m_env->CallStaticObjectMethod(clCls, getSys);
+                if (m_env->ExceptionCheck()) {
+                    m_env->ExceptionClear();
+                }
+                if (sysLoader != nullptr) {
+                    // loadClass 收点分名
+                    jstring nameArg = m_env->NewStringUTF(opts.mainClass.c_str());
+                    jobject loaded = m_env->CallObjectMethod(sysLoader, loadCls, nameArg);
+                    if (m_env->ExceptionCheck()) {
+                        m_env->ExceptionClear();
+                        logWarn("JvmLauncher",
+                                "system ClassLoader.loadClass failed for " + opts.mainClass);
+                    } else if (loaded != nullptr) {
+                        mainCls = (jclass) loaded;
+                        logInfo("JvmLauncher",
+                                "main class resolved via system ClassLoader: " + opts.mainClass);
+                    }
+                    if (nameArg != nullptr) {
+                        m_env->DeleteLocalRef(nameArg);
+                    }
+                }
+            }
+            m_env->DeleteLocalRef(clCls);
+        }
+    }
+
+    // 兜底：JNI FindClass
+    if (mainCls == nullptr) {
+        mainCls = m_env->FindClass(slashed.c_str());
+    }
+
     if (mainCls == nullptr) {
         if (m_env->ExceptionCheck()) {
             m_env->ExceptionDescribe();
